@@ -79,9 +79,11 @@ export const LoginScreen: React.FC = () => {
       {/* Top Bar with Theme Toggle */}
       <div className="max-w-6xl w-full mx-auto flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-md shadow-emerald-950/30">
-            <HeartHandshake className="w-5 h-5" />
-          </div>
+          <img
+            src="/logo_ninho.jpg"
+            alt="Logo Ninho"
+            className="w-9 h-9 rounded-xl object-cover bg-white p-0.5 shadow-md shadow-emerald-950/20 border border-emerald-500/30 flex-shrink-0"
+          />
           <div>
             <span className="font-bold text-xs sm:text-sm text-stone-900 dark:text-stone-100">
               {clinicaNome}
@@ -106,8 +108,8 @@ export const LoginScreen: React.FC = () => {
         <div className="bg-white dark:bg-stone-900 rounded-3xl border border-stone-200 dark:border-stone-800 shadow-xl overflow-hidden">
           {/* Card Header */}
           <div className="p-6 sm:p-8 bg-gradient-to-b from-emerald-50/70 to-transparent dark:from-emerald-950/30 dark:to-transparent border-b border-stone-100 dark:border-stone-800/80 text-center">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-600 text-white mx-auto flex items-center justify-center shadow-lg shadow-emerald-900/30 mb-3">
-              <Shield className="w-7 h-7" />
+            <div className="w-20 h-20 rounded-2xl overflow-hidden mx-auto shadow-lg shadow-emerald-900/20 mb-3 border border-emerald-500/30 bg-white p-1">
+              <img src="/logo_ninho.jpg" alt="Logo Ninho" className="w-full h-full object-cover rounded-xl" />
             </div>
             <h2 className="text-xl font-black text-stone-900 dark:text-stone-100 tracking-tight">
               Acesso ao Sistema

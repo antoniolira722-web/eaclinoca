@@ -56,7 +56,7 @@ export function gerarRelatorioPDF({ doc: relatorio, paciente, configuracoes }: G
     pdf.setTextColor(6, 78, 59); // Emerald 900
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(13);
-    pdf.text((configuracoes.nomeClinica || 'EA — Clínica Psicopedagógica').toUpperCase(), marginLeft + 16, currentY + 4.5);
+    pdf.text((configuracoes.nomeClinica || 'Ninho').toUpperCase(), marginLeft + 16, currentY + 4.5);
 
     pdf.setTextColor(55, 65, 81); // Stone 700
     pdf.setFont('helvetica', 'normal');

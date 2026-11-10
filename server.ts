@@ -3,8 +3,19 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 
+// Ignore benign WebSocket/HMR port conflicts in dev environment
+process.on('uncaughtException', (err: any) => {
+  if (err?.message && (err.message.includes('WebSocket') || err.message.includes('24678'))) {
+    console.warn('Vite WebSocket warning suppressed:', err.message);
+    return;
+  }
+  console.error('Uncaught server exception:', err);
+});
+
 const app = express();
-const PORT = 3000;
+const PORT = process.env.NODE_ENV === 'production'
+  ? (Number(process.env.PORT) || 8080)
+  : 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -296,10 +307,10 @@ const initialData: ClinicData = {
     }
   ],
   configuracoes: {
-    nomeClinica: 'Ninho Aprendiz — Clínica Psicopedagógica',
+    nomeClinica: 'Ninho',
     profissional: 'Ester Lopes',
     registroProfissional: 'ABPp 4821/SP',
-    contato: '(11) 98765-0000 · contato@ninhoaprendiz.com.br',
+    contato: '(11) 98765-0000 · contato@ninho.com.br',
     endereco: 'Av. Paulista, 1000 - Cj 84 - Bela Vista, São Paulo - SP',
     tema: 'system', // 'light' | 'dark' | 'system'
     notificacoesAtivas: true,
@@ -383,10 +394,26 @@ app.post('/api/reset-demo/:syncCode?', (req, res) => {
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Fallback to serving transformed index.html for client-side routing
+    app.use('*', async (req, res, next) => {
+      const url = req.originalUrl;
+      try {
+        const indexPath = path.resolve(process.cwd(), 'index.html');
+        let template = fs.readFileSync(indexPath, 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));

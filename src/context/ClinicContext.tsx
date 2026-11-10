@@ -17,6 +17,8 @@ import {
   TabType
 } from '../types';
 import { DEFAULT_USUARIOS_SISTEMA } from '../utils/authUtils';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../utils/firebase';
 
 interface ClinicContextType {
   state: ClinicState;
@@ -111,13 +113,13 @@ const defaultOpcoesRelatorio: OpcoesRelatorio = {
 };
 
 const defaultConfig: ConfiguracaoClinica = {
-  nomeClinica: 'EA — Clínica Psicopedagógica',
+  nomeClinica: 'Ninho',
   profissional: 'Ester Lopes',
   registroProfissional: 'ABPp 4821/SP',
-  contato: '(11) 98765-0000 · contato@eaclinica.com.br',
+  contato: '(11) 98765-0000 · contato@ninho.com.br',
   endereco: 'Av. Paulista, 1000 - Cj 84 - Bela Vista, São Paulo - SP',
   telefoneClinica: '(11) 98765-0000',
-  chavePix: 'contato@eaclinica.com.br',
+  chavePix: 'contato@ninho.com.br',
   valorPadrao: 180,
   tema: 'system',
   notificacoesAtivas: true,
@@ -216,7 +218,7 @@ const defaultInitialState: ClinicState = {
         nascBebe: '2026-02-14',
         semanasGestacao: 'Parto a termo com 39 semanas e 2 dias',
         paridade: 'G1P1 (Cesárea)',
-        tipoAleitamento: 'Exclusivo (AME) - em manejo',
+        tipoAleitamento: 'Exclusivo (AME)',
         queixaMamaria: 'Fissura em raio no mamilo direito; dor grau 8 ao início da sucção; pega rasa.',
         laserterapiaRealizada: true,
         hospitalMaternidade: 'Hospital e Maternidade Pro Matre'
@@ -565,6 +567,9 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           configuracoes: {
             ...defaultConfig,
             ...(parsed.configuracoes || {}),
+            nomeClinica: (!parsed.configuracoes?.nomeClinica || parsed.configuracoes.nomeClinica.includes('EA'))
+              ? 'Ninho'
+              : parsed.configuracoes.nomeClinica,
             seguranca: {
               ...defaultConfig.seguranca,
               ...(parsed.configuracoes?.seguranca || {})
@@ -665,78 +670,122 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem('ninho_sync_code', syncCode);
   }, [state, syncCode]);
 
-  // Push updates to cloud with debounce
+  // Push updates to Firestore and backend fallback
   const pushToCloud = useCallback(async (dataToPush: ClinicState, code: string) => {
     setSyncState('syncing');
     try {
-      const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dataToPush)
+      const clinicDocRef = doc(db, 'clinics', code);
+      await setDoc(clinicDocRef, {
+        clinicId: code,
+        pacientes: dataToPush.pacientes || [],
+        agenda: dataToPush.agenda || [],
+        sessoes: dataToPush.sessoes || [],
+        planos: dataToPush.planos || [],
+        financeiro: dataToPush.financeiro || [],
+        lembretes: dataToPush.lembretes || [],
+        notificacoes: dataToPush.notificacoes || [],
+        relatorios: dataToPush.relatorios || [],
+        usuarios: dataToPush.usuarios || [],
+        configuracoes: dataToPush.configuracoes || {},
+        lastUpdated: new Date().toISOString(),
+        version: Date.now()
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
       setSyncState('synced');
       setLastSyncTime(new Date());
     } catch (err) {
-      console.warn('Cloud sync offline / failed, saved locally', err);
-      setSyncState('offline');
+      console.warn('Firestore direct write failed, trying fallback API sync:', err);
+      try {
+        const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dataToPush)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        setSyncState('synced');
+        setLastSyncTime(new Date());
+      } catch (backendErr) {
+        console.warn('Backend sync failed, saved locally:', backendErr);
+        setSyncState('offline');
+      }
     }
   }, []);
 
-  // Trigger sync on state changes
+  // Trigger sync on state changes (debounced for rapid edits)
   const queueSync = useCallback((newState: ClinicState) => {
     if (!newState.configuracoes?.syncAuto) return;
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     setSyncState('pending');
     syncTimeoutRef.current = setTimeout(() => {
       pushToCloud(newState, syncCode);
-    }, 800);
+    }, 600);
   }, [pushToCloud, syncCode]);
 
-  // Initial fetch from cloud
-  const fetchFromCloud = useCallback(async (code: string) => {
-    setSyncState('syncing');
-    try {
-      const res = await fetch(`/api/sync/${encodeURIComponent(code)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = await res.json();
-      if (payload.success && payload.data) {
-        setState(prev => {
-          // Merge safely with fallback
-          const merged: ClinicState = {
-            pacientes: payload.data.pacientes || prev.pacientes || [],
-            agenda: payload.data.agenda || prev.agenda || [],
-            sessoes: payload.data.sessoes || prev.sessoes || [],
-            planos: payload.data.planos || prev.planos || [],
-            financeiro: payload.data.financeiro || prev.financeiro || [],
-            lembretes: payload.data.lembretes || prev.lembretes || [],
-            notificacoes: payload.data.notificacoes || prev.notificacoes || [],
-            relatorios: payload.data.relatorios || prev.relatorios || [],
-            configuracoes: {
-              ...defaultConfig,
-              ...(payload.data.configuracoes || prev.configuracoes),
-              opcoesRelatorio: {
-                ...defaultOpcoesRelatorio,
-                ...(payload.data.configuracoes?.opcoesRelatorio || prev.configuracoes?.opcoesRelatorio || {})
-              }
-            }
-          };
-          return merged;
-        });
-        setSyncState('synced');
-        setLastSyncTime(new Date());
-      }
-    } catch (err) {
-      console.warn('Initial cloud sync check failed, using local storage state', err);
-      setSyncState('offline');
-    }
-  }, []);
-
-  // Fetch on mount or code change
+  // Real-time synchronization across all computers and phones via Firestore onSnapshot
   useEffect(() => {
-    fetchFromCloud(syncCode);
-  }, [syncCode, fetchFromCloud]);
+    setSyncState('syncing');
+    const clinicDocRef = doc(db, 'clinics', syncCode);
+
+    const unsubscribe = onSnapshot(
+      clinicDocRef,
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const cloudData = docSnap.data() as Partial<ClinicState>;
+          setState(prev => {
+            const merged: ClinicState = {
+              pacientes: cloudData.pacientes ?? prev.pacientes ?? [],
+              agenda: cloudData.agenda ?? prev.agenda ?? [],
+              sessoes: cloudData.sessoes ?? prev.sessoes ?? [],
+              planos: cloudData.planos ?? prev.planos ?? [],
+              financeiro: cloudData.financeiro ?? prev.financeiro ?? [],
+              lembretes: cloudData.lembretes ?? prev.lembretes ?? [],
+              notificacoes: cloudData.notificacoes ?? prev.notificacoes ?? [],
+              relatorios: cloudData.relatorios ?? prev.relatorios ?? [],
+              usuarios: (cloudData.usuarios && cloudData.usuarios.length > 0) ? cloudData.usuarios : prev.usuarios,
+              configuracoes: {
+                ...defaultConfig,
+                ...(cloudData.configuracoes || prev.configuracoes),
+                nomeClinica: (!cloudData.configuracoes?.nomeClinica || cloudData.configuracoes.nomeClinica.includes('EA'))
+                  ? 'Ninho'
+                  : cloudData.configuracoes.nomeClinica,
+                opcoesRelatorio: {
+                  ...defaultOpcoesRelatorio,
+                  ...(cloudData.configuracoes?.opcoesRelatorio || prev.configuracoes?.opcoesRelatorio || {})
+                }
+              }
+            };
+            return merged;
+          });
+          setSyncState('synced');
+          setLastSyncTime(new Date());
+        } else {
+          // Document does not exist in Firestore yet: seed initial data
+          setDoc(clinicDocRef, {
+            clinicId: syncCode,
+            ...defaultInitialState,
+            lastUpdated: new Date().toISOString(),
+            version: 1
+          }).catch((err) => {
+            console.warn('Initial Firestore seed warning:', err);
+          });
+          setSyncState('synced');
+          setLastSyncTime(new Date());
+        }
+      },
+      (error) => {
+        console.warn('Firestore onSnapshot listener error:', error);
+        setSyncState('offline');
+        try {
+          handleFirestoreError(error, OperationType.GET, `clinics/${syncCode}`);
+        } catch (e) {
+          // suppressed
+        }
+      }
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [syncCode]);
 
   // Periodic reminder checking
   useEffect(() => {
@@ -1205,7 +1254,6 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const clean = newCode.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     if (!clean) return;
     setSyncCode(clean);
-    await fetchFromCloud(clean);
   };
 
   const forcarSincronizacao = async (): Promise<void> => {

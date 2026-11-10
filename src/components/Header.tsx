@@ -108,6 +108,12 @@ export const Header: React.FC<HeaderProps> = ({
             {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
 
+          <img
+            src="/logo_ninho.jpg"
+            alt="Logo Ninho"
+            className="md:hidden w-8 h-8 rounded-xl object-cover bg-white p-0.5 border border-emerald-500/30 flex-shrink-0"
+          />
+
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 dark:text-stone-500" />
             <input

@@ -1,0 +1,73 @@
+{
+  "entities": {
+    "Clinic": {
+      "title": "Clinic",
+      "description": "Clinic data container storing patients, agenda, sessions, PEI plans, finances, and settings for real-time synchronization across devices",
+      "type": "object",
+      "properties": {
+        "clinicId": {
+          "type": "string",
+          "description": "Unique identifier for the clinic tenant / sync group"
+        },
+        "pacientes": {
+          "type": "array",
+          "description": "List of registered patients"
+        },
+        "agenda": {
+          "type": "array",
+          "description": "List of scheduled appointments"
+        },
+        "sessoes": {
+          "type": "array",
+          "description": "List of clinical session logs"
+        },
+        "planos": {
+          "type": "array",
+          "description": "List of PEI and perinatal care plans"
+        },
+        "financeiro": {
+          "type": "array",
+          "description": "Financial invoices and payments"
+        },
+        "lembretes": {
+          "type": "array",
+          "description": "Reminders and tasks"
+        },
+        "notificacoes": {
+          "type": "array",
+          "description": "Recent clinical notifications"
+        },
+        "relatorios": {
+          "type": "array",
+          "description": "Clinical evaluation documents and reports"
+        },
+        "usuarios": {
+          "type": "array",
+          "description": "System users and access permissions"
+        },
+        "configuracoes": {
+          "type": "object",
+          "description": "Clinic operational preferences and configuration"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "description": "ISO timestamp of last modification"
+        },
+        "version": {
+          "type": "number",
+          "description": "Monotonically increasing version counter"
+        }
+      },
+      "required": [
+        "clinicId",
+        "lastUpdated"
+      ]
+    }
+  },
+  "firestore": {
+    "/clinics/{clinicId}": {
+      "schema": "Clinic",
+      "description": "Real-time synchronized clinic records accessible across desktop and mobile devices"
+    }
+  }
+}

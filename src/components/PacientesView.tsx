@@ -260,8 +260,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
     const matchCategoria = 
       categoriaFilter === 'Todas' ||
       (categoriaFilter === 'Infantil' && (p.categoria === 'Infantil / Escolar' || !p.categoria)) ||
-      (categoriaFilter === 'Gestante' && p.categoria === 'Gestante (Parto & Pré-Natal)') ||
-      (categoriaFilter === 'Puérpera' && p.categoria === 'Puérpera & Bebê (Amamentação)');
+      (categoriaFilter === 'Adulto' && p.categoria === 'Adulto / Família');
 
     return matchSearch && matchStatus && matchCategoria;
   });
@@ -276,7 +275,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
             Prontuário de Pacientes & Clientes
           </h1>
           <p className="text-xs sm:text-sm text-stone-500">
-            {state.pacientes.length} cadastros na clínica · Psicopedagogia & Enfermagem Perinatal (Parto e Amamentação)
+            {state.pacientes.length} cadastros na clínica · Psicopedagogia Infantil & Adulto
           </p>
         </div>
 
@@ -287,7 +286,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
             className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Cadastrar Paciente / Gestante</span>
+            <span>Cadastrar Paciente</span>
           </button>
         )}
       </div>
@@ -300,7 +299,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
             type="text"
             value={localSearch}
             onChange={(e) => setLocalSearch(e.target.value)}
-            placeholder="Pesquisar por nome, bebê, responsável, queixa ou tag..."
+            placeholder="Pesquisar por nome, queixa ou tag..."
             className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
           />
         </div>
@@ -309,9 +308,8 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 md:pb-0">
           {[
             { id: 'Todas', label: 'Todas as Áreas' },
-            { id: 'Gestante', label: '🤰 Gestantes (Parto)' },
-            { id: 'Puérpera', label: '🤱 Puérperas & Lactentes' },
-            { id: 'Infantil', label: '👶 Psicopedagogia Infantil' }
+            { id: 'Infantil', label: '👶 Psicopedagogia Infantil' },
+            { id: 'Adulto', label: '🧠 Psicopedagogia Adulto' }
           ].map((cat) => (
             <button
               key={cat.id}
@@ -367,6 +365,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredPacientes.map((p) => {
+            const isAdulto = p.categoria === 'Adulto / Família';
             const isGestante = p.categoria === 'Gestante (Parto & Pré-Natal)';
             const isPuerpera = p.categoria === 'Puérpera & Bebê (Amamentação)';
             const sessoesCount = state.sessoes.filter(s => s.pacienteId === p.id).length;
@@ -383,7 +382,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                     <div>
                       <div className="flex items-center gap-1.5">
                         <span className="text-base" role="img" aria-label="ícone">
-                          {isGestante ? '🤰' : isPuerpera ? '🤱' : '👶'}
+                          {isAdulto ? '🧠' : isGestante ? '🤰' : isPuerpera ? '🤱' : '👶'}
                         </span>
                         <h3 className="font-bold text-base text-stone-900 dark:text-stone-100 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                           {p.nome}
@@ -521,7 +520,9 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
               <div>
                 <div className="flex items-center gap-2.5">
                   <span className="text-xl">
-                    {activeDetailPatient.categoria === 'Gestante (Parto & Pré-Natal)'
+                    {activeDetailPatient.categoria === 'Adulto / Família'
+                      ? '🧠'
+                      : activeDetailPatient.categoria === 'Gestante (Parto & Pré-Natal)'
                       ? '🤰'
                       : activeDetailPatient.categoria === 'Puérpera & Bebê (Amamentação)'
                       ? '🤱'
@@ -956,11 +957,10 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                 <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
                   Área / Categoria de Atendimento *
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {[
-                    { id: 'Gestante (Parto & Pré-Natal)', label: '🤰 Gestante (Parto)', icon: '🤰' },
-                    { id: 'Puérpera & Bebê (Amamentação)', label: '🤱 Puérpera & Bebê', icon: '🤱' },
-                    { id: 'Infantil / Escolar', label: '👶 Psicopedagogia', icon: '👶' }
+                    { id: 'Infantil / Escolar', label: '👶 Psicopedagogia Infantil', icon: '👶' },
+                    { id: 'Adulto / Família', label: '🧠 Psicopedagogia Adulto', icon: '🧠' }
                   ].map((cat) => (
                     <button
                       key={cat.id}
@@ -989,14 +989,14 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                     required
                     value={formNome}
                     onChange={(e) => setFormNome(e.target.value)}
-                    placeholder={formCategoria.includes('Gestante') ? 'Ex: Camila Vasconcelos Ribeiro' : formCategoria.includes('Puérpera') ? 'Ex: Juliana & Bebê Theo Rocha' : 'Ex: Lucas Gabriel Silva'}
+                    placeholder={formCategoria === 'Adulto / Família' ? 'Ex: Carlos Alberto Souza' : 'Ex: Lucas Gabriel Silva'}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    Data de Nascimento da Paciente/Mãe *
+                    Data de Nascimento *
                   </label>
                   <input
                     type="date"
@@ -1181,14 +1181,14 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    {formCategoria.includes('Gestante') ? 'Companheiro(a) / Rede de Apoio *' : 'Responsável Legal *'}
+                    {formCategoria === 'Adulto / Família' ? 'Contato de Emergência / Familiar' : 'Responsável Legal *'}
                   </label>
                   <input
                     type="text"
                     required
                     value={formResp}
                     onChange={(e) => setFormResp(e.target.value)}
-                    placeholder="Ex: Rafael Ribeiro (Esposo / Rede de Apoio)"
+                    placeholder={formCategoria === 'Adulto / Família' ? 'Ex: Próprio paciente ou cônjuge' : 'Ex: Mariana Silva (Mãe)'}
                     className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100"
                   />
                 </div>
@@ -1245,7 +1245,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                   rows={3}
                   value={formQueixa}
                   onChange={(e) => setFormQueixa(e.target.value)}
-                  placeholder={formCategoria.includes('Gestante') ? 'Ex: Consultoria sobre plano de parto, alívio não farmacológico da dor e cuidados...' : formCategoria.includes('Puérpera') ? 'Ex: Dor ao amamentar, ajuste de pega, apoio no puerpério...' : 'Ex: Dificuldades no aprendizado, alfabetização...'}
+                  placeholder={formCategoria === 'Adulto / Família' ? 'Ex: Dificuldades de atenção, funções executivas, desorganização no trabalho/estudos, memória...' : 'Ex: Dificuldades no aprendizado, alfabetização, raciocínio lógico...'}
                   className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100"
                 />
               </div>

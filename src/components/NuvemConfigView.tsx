@@ -63,13 +63,13 @@ export const NuvemConfigView: React.FC<NuvemConfigViewProps> = ({ setActiveTab }
   const [newInstrumentInput, setNewInstrumentInput] = useState('');
 
   // General Settings State
-  const [formNomeClinica, setFormNomeClinica] = useState(state.configuracoes.nomeClinica || 'EA — Clínica Psicopedagógica');
+  const [formNomeClinica, setFormNomeClinica] = useState(state.configuracoes.nomeClinica || 'Ninho');
   const [formProfissional, setFormProfissional] = useState(state.configuracoes.profissional || 'Ester Lopes');
   const [formRegistro, setFormRegistro] = useState(state.configuracoes.registroProfissional || 'ABPp 4821/SP');
   const [formTelefone, setFormTelefone] = useState(state.configuracoes.telefoneClinica || '(11) 98765-0000');
-  const [formContato, setFormContato] = useState(state.configuracoes.contato || '(11) 98765-0000 · contato@eaclinica.com.br');
+  const [formContato, setFormContato] = useState(state.configuracoes.contato || '(11) 98765-0000 · contato@ninho.com.br');
   const [formEndereco, setFormEndereco] = useState(state.configuracoes.endereco || 'Av. Paulista, 1000 - Cj 84 - Bela Vista, São Paulo - SP');
-  const [formChavePix, setFormChavePix] = useState(state.configuracoes.chavePix || 'contato@eaclinica.com.br');
+  const [formChavePix, setFormChavePix] = useState(state.configuracoes.chavePix || 'contato@ninho.com.br');
   const [formValorSessao, setFormValorSessao] = useState(state.configuracoes.valorPadrao || 180);
   const [formAutoSync, setFormAutoSync] = useState(state.configuracoes.syncAuto ?? true);
   const [formLembretesSonoros, setFormLembretesSonoros] = useState(state.configuracoes.lembretesSonoros ?? true);
@@ -597,17 +597,23 @@ export const NuvemConfigView: React.FC<NuvemConfigViewProps> = ({ setActiveTab }
                           : 'bg-rose-500'
                       }`}
                     />
-                    <span className="font-bold text-base text-stone-900 dark:text-stone-100">
-                      {syncState === 'synced' && 'Nuvem Conectada e Sincronizada'}
-                      {syncState === 'syncing' && 'Sincronizando com a nuvem...'}
+                    <span className="font-bold text-base text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                      {syncState === 'synced' && 'Google Cloud Firestore — Tempo Real Ativo'}
+                      {syncState === 'syncing' && 'Sincronizando com Google Cloud...'}
                       {syncState === 'offline' && 'Modo Offline (Salvo Localmente)'}
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
+                      Multi-Dispositivo
                     </span>
                   </div>
 
                   <p className="text-xs text-stone-500">
+                    Cadastros e alterações feitos no celular ou no computador são refletidos instantaneamente em todos os outros aparelhos conectados via Google Cloud Firestore.
+                  </p>
+                  <p className="text-[11px] text-stone-400">
                     {lastSyncTime
-                      ? `Última sincronização bem-sucedida em ${lastSyncTime.toLocaleTimeString('pt-BR')} (${lastSyncTime.toLocaleDateString('pt-BR')})`
-                      : 'Sincronização contínua ativada.'}
+                      ? `Conexão ativa e sincronizada às ${lastSyncTime.toLocaleTimeString('pt-BR')} (${lastSyncTime.toLocaleDateString('pt-BR')})`
+                      : 'Sincronização em tempo real habilitada.'}
                   </p>
 
                   {/* Sync Code Box */}

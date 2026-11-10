@@ -510,7 +510,7 @@ export const RelatoriosView: React.FC<RelatoriosViewProps> = ({
     const pacNome = pac?.nome || 'o(a) paciente';
     const profNome = cfg?.profissional || 'Ester Lopes';
     const regProf = cfg?.registroProfissional || 'ABPp 4821/SP';
-    const clinicaNome = cfg?.nomeClinica || 'EA — Clínica Psicopedagógica';
+    const clinicaNome = cfg?.nomeClinica || 'Ninho';
     const contato = cfg?.contato || '';
 
     let saudacao = 'Prezados pais e responsáveis,';

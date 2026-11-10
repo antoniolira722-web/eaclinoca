@@ -186,7 +186,7 @@ export const PlanosView: React.FC<PlanosViewProps> = ({
               const count = state.planos.filter(pl => pl.pacienteId === p.id).length;
               return (
                 <option key={p.id} value={p.id}>
-                  {p.categoria === 'Gestante (Parto & Pré-Natal)' ? '🤰 ' : p.categoria === 'Puérpera & Bebê (Amamentação)' ? '🤱 ' : '👶 '}
+                  {p.categoria === 'Adulto / Família' ? '🧠 ' : '👶 '}
                   {p.nome} ({count})
                 </option>
               );
@@ -341,7 +341,7 @@ export const PlanosView: React.FC<PlanosViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-1">
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    Paciente / Gestante *
+                    Paciente *
                   </label>
                   <select
                     required
@@ -355,7 +355,7 @@ export const PlanosView: React.FC<PlanosViewProps> = ({
                     <option value="">Selecione...</option>
                     {state.pacientes.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.categoria === 'Gestante (Parto & Pré-Natal)' ? '🤰 ' : p.categoria === 'Puérpera & Bebê (Amamentação)' ? '🤱 ' : '👶 '}
+                        {p.categoria === 'Adulto / Família' ? '🧠 ' : '👶 '}
                         {p.nome}
                       </option>
                     ))}

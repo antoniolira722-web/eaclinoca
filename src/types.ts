@@ -92,6 +92,7 @@ export interface SessaoPerinatal {
   condicaoMamas?: string; // ex: Macias, Ingurgitadas, Fissuras bilaterais, etc.
   avaliacaoPega?: string; // ex: Pega profunda com boca ampla, lábios evertidos, deglutição audível
   posicoesTrabalhadas?: string[]; // Tradicional, Invertida, Cavaleiro, Deitada
+  posicoesOrientadas?: string;
   medidasAlivioDorParto?: string[]; // Bola suíça, banho morno, massagem sacral, respiração
   laserterapiaDose?: string; // ex: 2J/ponto para cicatrização mamilar
   condutaPerinatal?: string;

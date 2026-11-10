@@ -261,10 +261,10 @@ Profissional: ${isPerinatal ? 'Enf. Juliana Silveira (Enfermeira Perinatal · CO
               onChange={(e) => setSelectedPatientFilter(e.target.value)}
               className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100"
             >
-              <option value="Todos">Todos os Pacientes e Gestantes ({state.pacientes.length})</option>
+              <option value="Todos">Todos os Pacientes ({state.pacientes.length})</option>
               {state.pacientes.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.categoria === 'Gestante (Parto & Pré-Natal)' ? '🤰 ' : p.categoria === 'Puérpera & Bebê (Amamentação)' ? '🤱 ' : '👶 '}
+                  {p.categoria === 'Adulto / Família' ? '🧠 ' : '👶 '}
                   {p.nome}
                 </option>
               ))}
@@ -513,7 +513,7 @@ Profissional: ${isPerinatal ? 'Enf. Juliana Silveira (Enfermeira Perinatal · CO
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-1">
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    Paciente / Gestante *
+                    Paciente *
                   </label>
                   <select
                     required
@@ -524,7 +524,7 @@ Profissional: ${isPerinatal ? 'Enf. Juliana Silveira (Enfermeira Perinatal · CO
                     <option value="">Selecione...</option>
                     {state.pacientes.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.categoria === 'Gestante (Parto & Pré-Natal)' ? '🤰 ' : p.categoria === 'Puérpera & Bebê (Amamentação)' ? '🤱 ' : '👶 '}
+                        {p.categoria === 'Adulto / Família' ? '🧠 ' : '👶 '}
                         {p.nome}
                       </option>
                     ))}
