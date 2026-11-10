@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix  EA - Clínica",
+  "description": "Sistema completo de gestão psicopedagógica com autenticação segura por usuário e senha, níveis de acesso e permissões de perfil (Admin, Psicopedagogo, Recepção, Estagiário), exportação de laudos em PDF, envio por e-mail, prontuário com sigilo clínico, agenda, sessões, PEI, financeiro e sincronização.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
