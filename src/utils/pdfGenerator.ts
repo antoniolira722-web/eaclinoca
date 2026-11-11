@@ -50,12 +50,12 @@ export function gerarRelatorioPDF({ doc: relatorio, paciente, configuracoes }: G
     pdf.setTextColor(255, 255, 255);
     pdf.setFont('helvetica', 'bold');
     pdf.setFontSize(10);
-    pdf.text('EA', marginLeft + 6, currentY + 7.5, { align: 'center' });
+    pdf.text('N', marginLeft + 6, currentY + 7.5, { align: 'center' });
 
     // Clinic name & details
     pdf.setTextColor(6, 78, 59); // Emerald 900
     pdf.setFont('helvetica', 'bold');
-    pdf.setFontSize(13);
+    pdf.setFontSize(12);
     pdf.text((configuracoes.nomeClinica || 'Ninho').toUpperCase(), marginLeft + 16, currentY + 4.5);
 
     pdf.setTextColor(55, 65, 81); // Stone 700

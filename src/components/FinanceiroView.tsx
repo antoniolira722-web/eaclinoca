@@ -112,8 +112,9 @@ export const FinanceiroView: React.FC<FinanceiroViewProps> = ({
       return;
     }
     const numeroLimpo = p.fone.replace(/\D/g, '');
+    const chavePix = state.configuracoes.chavePix || 'contato@clinica.com.br';
     const msg = encodeURIComponent(
-      `Olá, ${p.resp}! Aqui é da clínica ${state.configuracoes.nomeClinica}. Segue o demonstrativo da mensalidade psicopedagógica de ${p.nome} referente à competência ${f.comp} no valor de ${formatarMoeda(f.valor)}, com vencimento em ${formatarData(f.dataVenc)}. Chave PIX: contato@ninhoaprendiz.com.br. Agradecemos a parceria!`
+      `Olá, ${p.resp}! Aqui é da clínica ${state.configuracoes.nomeClinica}. Segue o demonstrativo da mensalidade psicopedagógica de ${p.nome} referente à competência ${f.comp} no valor de ${formatarMoeda(f.valor)}, com vencimento em ${formatarData(f.dataVenc)}. Chave PIX: ${chavePix}. Agradecemos a parceria!`
     );
     window.open(`https://wa.me/55${numeroLimpo}?text=${msg}`, '_blank');
   };

@@ -80,11 +80,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div>
           {/* Clinic Brand */}
           <div className="flex items-center gap-3 px-2 py-3 mb-5 border-b border-stone-800/80">
-            <img
-              src="/logo_ninho.jpg"
-              alt="Logo Ninho"
-              className="w-11 h-11 rounded-2xl object-cover bg-white p-0.5 shadow-md shadow-emerald-950/40 border border-emerald-500/30 flex-shrink-0"
-            />
+            <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shadow-md shadow-emerald-950/40">
+              <HeartHandshake className="w-6 h-6" />
+            </div>
             <div>
               <h1 className="text-sm font-bold tracking-tight text-white leading-tight">
                 {state.configuracoes?.nomeClinica || 'Ninho'}
@@ -202,11 +200,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Header inside drawer */}
               <div className="flex items-center justify-between pb-4 mb-4 border-b border-stone-800">
                 <div className="flex items-center gap-3">
-                  <img
-                    src="/logo_ninho.jpg"
-                    alt="Logo Ninho"
-                    className="w-10 h-10 rounded-xl object-cover bg-white p-0.5 shadow-md border border-emerald-500/30 flex-shrink-0"
-                  />
+                  <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-md shadow-emerald-950/40">
+                    <HeartHandshake className="w-5 h-5" />
+                  </div>
                   <div>
                     <h2 className="text-sm font-bold text-white leading-tight">
                       {state.configuracoes?.nomeClinica || 'Ninho'}

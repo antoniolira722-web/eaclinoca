@@ -13,9 +13,7 @@ process.on('uncaughtException', (err: any) => {
 });
 
 const app = express();
-const PORT = process.env.NODE_ENV === 'production'
-  ? (Number(process.env.PORT) || 8080)
-  : 3000;
+const PORT = Number(process.env.PORT) || (process.env.NODE_ENV === 'production' ? 8080 : 3000);
 
 app.use(express.json({ limit: '10mb' }));
 
