@@ -32,6 +32,27 @@ export interface DadosPerinatais {
   acompanhanteParto?: string;
 }
 
+export type CategoriaDocumentoAnexo = 
+  | 'Laudo Médico / Avaliação' 
+  | 'Relatório / Histórico Escolar' 
+  | 'Exame Clínico / Audiometria' 
+  | 'Documento Pessoal (RG / Certidão / SUS)' 
+  | 'Termo de Consentimento / Contrato' 
+  | 'Atividade / Produção Gráfica' 
+  | 'Outro';
+
+export interface DocumentoAnexo {
+  id: string;
+  nome: string;
+  tipo?: string; // ex: 'application/pdf', 'image/png', 'image/jpeg'
+  categoria?: CategoriaDocumentoAnexo;
+  tamanho?: number; // em bytes
+  dataUpload: string; // ISO date string
+  url?: string; // Base64 Data URL ou link de download
+  descricao?: string;
+  enviadoPor?: string;
+}
+
 export interface Paciente {
   id: string;
   nome: string;
@@ -50,6 +71,7 @@ export interface Paciente {
   tags?: string[];
   notasGerais?: string;
   dadosPerinatais?: DadosPerinatais;
+  documentos?: DocumentoAnexo[];
 }
 
 export type TipoAgendamento = 

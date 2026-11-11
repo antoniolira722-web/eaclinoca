@@ -14,7 +14,8 @@ import {
   ConfiguracaoSeguranca,
   UsuarioSistema,
   SyncState,
-  TabType
+  TabType,
+  DocumentoAnexo
 } from '../types';
 import { DEFAULT_USUARIOS_SISTEMA } from '../utils/authUtils';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -28,10 +29,12 @@ interface ClinicContextType {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   
-  // Pacientes
+  // Pacientes & Anexos
   addPaciente: (p: Omit<Paciente, 'id'>) => Promise<string>;
   updatePaciente: (id: string, p: Partial<Paciente>) => Promise<void>;
   deletePaciente: (id: string) => Promise<void>;
+  anexarDocumentoPaciente: (pacienteId: string, doc: Omit<DocumentoAnexo, 'id' | 'dataUpload'>) => Promise<DocumentoAnexo>;
+  removerDocumentoPaciente: (pacienteId: string, documentoId: string) => Promise<void>;
   
   // Agenda
   addAgendaItem: (item: Omit<AgendaItem, 'id'>) => Promise<string>;
@@ -154,7 +157,29 @@ const defaultInitialState: ClinicState = {
       medicacao: 'Nenhuma',
       dataInicio: '2026-02-10',
       status: 'Ativo',
-      tags: ['Dislexia (Hipótese)', 'TDAH', 'Alfabetização']
+      tags: ['Dislexia (Hipótese)', 'TDAH', 'Alfabetização'],
+      documentos: [
+        {
+          id: 'doc_1',
+          nome: 'Encaminhamento_Pedagogico_Escola.pdf',
+          tipo: 'application/pdf',
+          categoria: 'Relatório / Histórico Escolar',
+          tamanho: 245000,
+          dataUpload: '2026-02-12T14:30:00Z',
+          descricao: 'Relatório enviado pela coordenação descrevendo trocas fonológicas e desafios na leitura em sala.',
+          enviadoPor: 'Coord. Escolar'
+        },
+        {
+          id: 'doc_2',
+          nome: 'Avaliacao_Audiologica_PAC.pdf',
+          tipo: 'application/pdf',
+          categoria: 'Exame Clínico / Audiometria',
+          tamanho: 512000,
+          dataUpload: '2026-02-18T10:15:00Z',
+          descricao: 'Exame do Processamento Auditivo Central (PAC) com limiares auditivos dentro dos padrões normais.',
+          enviadoPor: 'Clínica Otorrino'
+        }
+      ]
     },
     {
       id: 'pac_2',
@@ -880,6 +905,66 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   };
 
+  const anexarDocumentoPaciente = async (
+    pacienteId: string,
+    docData: Omit<DocumentoAnexo, 'id' | 'dataUpload'>
+  ): Promise<DocumentoAnexo> => {
+    const novoDoc: DocumentoAnexo = {
+      id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      dataUpload: new Date().toISOString(),
+      ...docData
+    };
+    setState(prev => {
+      const next = {
+        ...prev,
+        pacientes: prev.pacientes.map(item => {
+          if (item.id === pacienteId) {
+            return {
+              ...item,
+              documentos: [...(item.documentos || []), novoDoc]
+            };
+          }
+          return item;
+        })
+      };
+      queueSync(next);
+      return next;
+    });
+
+    const pac = state.pacientes.find(p => p.id === pacienteId);
+    adicionarNotificacao({
+      tipo: 'sistema',
+      titulo: 'Documento Anexado',
+      mensagem: `Documento "${novoDoc.nome}" foi anexado com sucesso ao prontuário de ${pac?.nome || 'paciente'}.`,
+      linkTab: 'pacientes',
+      actionId: pacienteId
+    });
+
+    return novoDoc;
+  };
+
+  const removerDocumentoPaciente = async (
+    pacienteId: string,
+    documentoId: string
+  ): Promise<void> => {
+    setState(prev => {
+      const next = {
+        ...prev,
+        pacientes: prev.pacientes.map(item => {
+          if (item.id === pacienteId) {
+            return {
+              ...item,
+              documentos: (item.documentos || []).filter(d => d.id !== documentoId)
+            };
+          }
+          return item;
+        })
+      };
+      queueSync(next);
+      return next;
+    });
+  };
+
   // Agenda
   const addAgendaItem = async (item: Omit<AgendaItem, 'id'>): Promise<string> => {
     const id = `ag_${Date.now()}`;
@@ -1303,6 +1388,8 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addPaciente,
         updatePaciente,
         deletePaciente,
+        anexarDocumentoPaciente,
+        removerDocumentoPaciente,
         addAgendaItem,
         updateAgendaItem,
         deleteAgendaItem,

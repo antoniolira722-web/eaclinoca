@@ -26,11 +26,16 @@ import {
   Baby,
   Heart,
   Stethoscope,
-  Activity
+  Activity,
+  Paperclip,
+  Upload,
+  Eye,
+  FileCheck,
+  FolderOpen
 } from 'lucide-react';
 import { useClinic } from '../context/ClinicContext';
 import { useAuth } from '../context/AuthContext';
-import { Paciente, StatusPaciente, TabType, CategoriaPaciente, DadosPerinatais } from '../types';
+import { Paciente, StatusPaciente, TabType, CategoriaPaciente, DadosPerinatais, DocumentoAnexo, CategoriaDocumentoAnexo } from '../types';
 import { calcularIdade, formatarData, formatarMoeda } from '../utils/dateUtils';
 import { downloadRelatorioPDF } from '../utils/pdfGenerator';
 import { Lock, Shield } from 'lucide-react';
@@ -60,7 +65,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
   selectedPatientId,
   setSelectedPatientId
 }) => {
-  const { state, addPaciente, updatePaciente, deletePaciente } = useClinic();
+  const { state, addPaciente, updatePaciente, deletePaciente, anexarDocumentoPaciente, removerDocumentoPaciente } = useClinic();
   const { hasPermission, currentUser } = useAuth();
 
   const podeGerenciarPacientes = hasPermission('gerenciarPacientes');
@@ -80,7 +85,23 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
     return null;
   });
 
-  const [detailTab, setDetailTab] = useState<'anamnese' | 'perinatal' | 'sessoes' | 'planos' | 'relatorios' | 'financeiro'>('anamnese');
+  const selectedPatient = activeDetailPatient
+    ? (state.pacientes.find(p => p.id === activeDetailPatient.id) || activeDetailPatient)
+    : null;
+
+  const [detailTab, setDetailTab] = useState<'anamnese' | 'perinatal' | 'documentos' | 'sessoes' | 'planos' | 'relatorios' | 'financeiro'>('anamnese');
+
+  // Document Attachment State for Detail Modal
+  const [isAddDocOpen, setIsAddDocOpen] = useState(false);
+  const [docFilterCategory, setDocFilterCategory] = useState<string>('Todas');
+  const [newDocNome, setNewDocNome] = useState('');
+  const [newDocCategoria, setNewDocCategoria] = useState<CategoriaDocumentoAnexo>('Laudo Médico / Avaliação');
+  const [newDocDescricao, setNewDocDescricao] = useState('');
+  const [newDocFile, setNewDocFile] = useState<{ name: string; size: number; type: string; url: string } | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentoAnexo | null>(null);
+
+  // Form State for New/Edit Patient
+  const [formDocumentos, setFormDocumentos] = useState<DocumentoAnexo[]>([]);
 
   // Form State
   const [formNome, setFormNome] = useState('');
@@ -112,6 +133,32 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
   const [formQueixaMamaria, setFormQueixaMamaria] = useState('');
   const [formLaserterapiaRealizada, setFormLaserterapiaRealizada] = useState(false);
 
+  const formatarTamanho = (bytes?: number): string => {
+    if (!bytes) return '—';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const getDocBadgeColor = (cat?: CategoriaDocumentoAnexo): string => {
+    switch (cat) {
+      case 'Laudo Médico / Avaliação':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800';
+      case 'Relatório / Histórico Escolar':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800';
+      case 'Exame Clínico / Audiometria':
+        return 'bg-teal-100 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800';
+      case 'Documento Pessoal (RG / Certidão / SUS)':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+      case 'Termo de Consentimento / Contrato':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800';
+      case 'Atividade / Produção Gráfica':
+        return 'bg-pink-100 text-pink-800 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800';
+      default:
+        return 'bg-stone-100 text-stone-800 dark:bg-stone-800 dark:text-stone-300 border-stone-200 dark:border-stone-700';
+    }
+  };
+
   const openNewModal = () => {
     setEditingPatient(null);
     setFormNome('');
@@ -128,6 +175,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
     setFormStatus('Ativo');
     setFormTagsStr('');
     setFormNotasGerais('');
+    setFormDocumentos([]);
 
     // Perinatal
     setFormSemanasGestacao('');
@@ -162,6 +210,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
     setFormStatus(p.status || 'Ativo');
     setFormTagsStr((p.tags || []).join(', '));
     setFormNotasGerais(p.notasGerais || '');
+    setFormDocumentos(p.documentos || []);
 
     // Perinatal
     const dp = p.dadosPerinatais;
@@ -221,13 +270,14 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
       tags: tagsArray,
       notasGerais: formNotasGerais.trim(),
       dadosPerinatais: (formCategoria.includes('Gestante') || formCategoria.includes('Puérpera') || formSemanasGestacao || formNomeBebe) ? dadosPerinatais : undefined,
+      documentos: formDocumentos,
       dataInicio: editingPatient?.dataInicio || new Date().toISOString().slice(0, 10)
     };
 
     if (editingPatient) {
       await updatePaciente(editingPatient.id, payload);
       if (activeDetailPatient?.id === editingPatient.id) {
-        setActiveDetailPatient({ ...editingPatient, ...payload });
+        setActiveDetailPatient({ ...editingPatient, ...payload, documentos: formDocumentos });
       }
     } else {
       await addPaciente(payload);
@@ -243,6 +293,99 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
         setActiveDetailPatient(null);
       }
     }
+  };
+
+  const handleSelectDocFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 8 * 1024 * 1024) {
+      alert('O arquivo selecionado excede o limite recomendado de 8 MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      setNewDocFile({
+        name: file.name,
+        size: file.size,
+        type: file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+        url: dataUrl
+      });
+      if (!newDocNome) {
+        setNewDocNome(file.name.replace(/\.[^/.]+$/, ''));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveNewDoc = async () => {
+    if (!selectedPatient) return;
+    if (!newDocFile) {
+      alert('Por favor, selecione um arquivo (PDF, imagem ou documento) para anexar.');
+      return;
+    }
+
+    const docPayload = {
+      nome: newDocNome.trim() || newDocFile.name,
+      tipo: newDocFile.type,
+      categoria: newDocCategoria,
+      tamanho: newDocFile.size,
+      url: newDocFile.url,
+      descricao: newDocDescricao.trim(),
+      enviadoPor: currentUser?.nome || 'Profissional'
+    };
+
+    const saved = await anexarDocumentoPaciente(selectedPatient.id, docPayload);
+    setActiveDetailPatient(prev => prev ? { ...prev, documentos: [...(prev.documentos || []), saved] } : null);
+
+    // Reset form
+    setNewDocFile(null);
+    setNewDocNome('');
+    setNewDocDescricao('');
+    setIsAddDocOpen(false);
+  };
+
+  const handleRemoveDoc = async (documentoId: string, nomeDoc: string) => {
+    if (!selectedPatient) return;
+    if (window.confirm(`Deseja realmente remover o anexo "${nomeDoc}" do prontuário?`)) {
+      await removerDocumentoPaciente(selectedPatient.id, documentoId);
+      setActiveDetailPatient(prev => prev ? { ...prev, documentos: (prev.documentos || []).filter(d => d.id !== documentoId) } : null);
+    }
+  };
+
+  const handleAddFormDocument = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 8 * 1024 * 1024) {
+      alert('O arquivo selecionado excede o limite recomendado de 8 MB.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const novoDoc: DocumentoAnexo = {
+        id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        nome: file.name,
+        tipo: file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+        categoria: 'Laudo Médico / Avaliação',
+        tamanho: file.size,
+        dataUpload: new Date().toISOString(),
+        url: dataUrl,
+        descricao: '',
+        enviadoPor: currentUser?.nome || 'Profissional'
+      };
+      setFormDocumentos(prev => [...prev, novoDoc]);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleRemoveFormDocument = (id: string) => {
+    setFormDocumentos(prev => prev.filter(d => d.id !== id));
   };
 
   const filteredPacientes = state.pacientes.filter(p => {
@@ -478,13 +621,32 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
 
                 {/* Bottom Actions */}
                 <div className="pt-3 border-t border-stone-100 dark:border-stone-800/80 flex items-center justify-between gap-2">
-                  <button
-                    onClick={() => setActiveDetailPatient(p)}
-                    className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Prontuário Completo</span>
-                  </button>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      onClick={() => {
+                        setActiveDetailPatient(p);
+                        setDetailTab('anamnese');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Prontuário Completo</span>
+                    </button>
+
+                    {p.documentos && p.documentos.length > 0 && (
+                      <button
+                        onClick={() => {
+                          setActiveDetailPatient(p);
+                          setDetailTab('documentos');
+                        }}
+                        className="px-2 py-1.5 rounded-xl bg-stone-100 dark:bg-stone-800 hover:bg-stone-200 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300 text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Ver documentos e laudos anexados"
+                      >
+                        <Paperclip className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                        <span>{p.documentos.length} anexo{p.documentos.length > 1 ? 's' : ''}</span>
+                      </button>
+                    )}
+                  </div>
 
                   {podeGerenciarPacientes && (
                     <div className="flex items-center gap-1">
@@ -560,10 +722,11 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
             <div className="px-6 py-2.5 bg-stone-100/60 dark:bg-stone-800/40 border-b border-stone-200 dark:border-stone-800 flex gap-2 overflow-x-auto">
               {[
                 { id: 'anamnese', label: 'Anamnese & Contato' },
-                ...(activeDetailPatient.dadosPerinatais ? [{ id: 'perinatal', label: '🤰 Dados Perinatais & Mamas' }] : []),
-                { id: 'sessoes', label: `Consultas / Sessões (${state.sessoes.filter(s => s.pacienteId === activeDetailPatient.id).length})` },
-                { id: 'planos', label: `Planos de Cuidado / PEI (${state.planos.filter(p => p.pacienteId === activeDetailPatient.id).length})` },
-                { id: 'relatorios', label: `Laudos & Pareceres (${(state.relatorios || []).filter(r => r.pacienteId === activeDetailPatient.id).length})` },
+                ...(selectedPatient?.dadosPerinatais ? [{ id: 'perinatal', label: '🤰 Dados Perinatais & Mamas' }] : []),
+                { id: 'documentos', label: `📎 Documentos (${(selectedPatient?.documentos || []).length})` },
+                { id: 'sessoes', label: `Consultas / Sessões (${state.sessoes.filter(s => s.pacienteId === selectedPatient?.id).length})` },
+                { id: 'planos', label: `Planos de Cuidado / PEI (${state.planos.filter(p => p.pacienteId === selectedPatient?.id).length})` },
+                { id: 'relatorios', label: `Laudos & Pareceres (${(state.relatorios || []).filter(r => r.pacienteId === selectedPatient?.id).length})` },
                 { id: 'financeiro', label: 'Financeiro' }
               ].map((t) => (
                 <button
@@ -869,6 +1032,328 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                         ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {detailTab === 'documentos' && selectedPatient && (
+                <div className="space-y-4">
+                  {/* Top Bar inside Documentos Tab */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-stone-50 dark:bg-stone-800/60 border border-stone-200 dark:border-stone-800">
+                    <div>
+                      <h4 className="font-bold text-sm text-stone-900 dark:text-stone-100 flex items-center gap-2">
+                        <Paperclip className="w-4 h-4 text-emerald-600" />
+                        <span>Documentos & Anexos Clínicos</span>
+                      </h4>
+                      <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
+                        Laudos médicos, encaminhamentos escolares, exames, fotos e termos anexados a este paciente.
+                      </p>
+                    </div>
+
+                    {podeGerenciarPacientes && (
+                      <button
+                        onClick={() => setIsAddDocOpen(!isAddDocOpen)}
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer flex-shrink-0"
+                      >
+                        {isAddDocOpen ? (
+                          <>
+                            <X className="w-4 h-4" />
+                            <span>Fechar Formulário</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="w-4 h-4" />
+                            <span>Anexar Documento</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Add Document Form Accordion */}
+                  {isAddDocOpen && podeGerenciarPacientes && (
+                    <div className="p-4 sm:p-5 rounded-2xl bg-emerald-50/40 dark:bg-emerald-950/20 border-2 border-emerald-500/40 space-y-4 animate-in fade-in slide-in-from-top-2">
+                      <div className="flex items-center justify-between">
+                        <h5 className="font-bold text-xs uppercase tracking-wider text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                          <Upload className="w-4 h-4 text-emerald-600" />
+                          <span>Novo Arquivo / Laudo Anexo</span>
+                        </h5>
+                        <span className="text-[11px] text-stone-500">PDF, Imagens (PNG/JPG), Documentos até 8MB</span>
+                      </div>
+
+                      {/* File Selector Zone */}
+                      <div className="border-2 border-dashed border-stone-300 dark:border-stone-700 hover:border-emerald-500 rounded-2xl p-4 bg-white dark:bg-stone-900/60 text-center transition-colors">
+                        <input
+                          id="patient-file-upload-input"
+                          type="file"
+                          accept=".pdf,image/*,.doc,.docx,.txt"
+                          onChange={handleSelectDocFile}
+                          className="hidden"
+                        />
+                        {newDocFile ? (
+                          <div className="flex items-center justify-between gap-3 p-2 bg-stone-50 dark:bg-stone-800 rounded-xl text-left">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="w-9 h-9 rounded-lg bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 flex items-center justify-center flex-shrink-0 font-bold text-xs">
+                                {newDocFile.type.includes('pdf') ? 'PDF' : newDocFile.type.includes('image') ? 'IMG' : 'DOC'}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-stone-900 dark:text-stone-100 truncate">{newDocFile.name}</p>
+                                <p className="text-[11px] text-stone-500">{formatarTamanho(newDocFile.size)}</p>
+                              </div>
+                            </div>
+                            <label
+                              htmlFor="patient-file-upload-input"
+                              className="px-2.5 py-1 text-xs text-emerald-600 hover:underline cursor-pointer font-semibold flex-shrink-0"
+                            >
+                              Trocar arquivo
+                            </label>
+                          </div>
+                        ) : (
+                          <label
+                            htmlFor="patient-file-upload-input"
+                            className="cursor-pointer flex flex-col items-center justify-center py-4"
+                          >
+                            <Upload className="w-8 h-8 text-stone-400 dark:text-stone-500 mb-2" />
+                            <p className="text-xs font-bold text-stone-700 dark:text-stone-200">
+                              Clique aqui para selecionar o arquivo
+                            </p>
+                            <p className="text-[11px] text-stone-400 mt-1">
+                              Suporta laudos em PDF, fotos de avaliações, exames e relatórios
+                            </p>
+                          </label>
+                        )}
+                      </div>
+
+                      {/* Fields */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <label className="block font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                            Título / Nome do Documento *
+                          </label>
+                          <input
+                            type="text"
+                            value={newDocNome}
+                            onChange={(e) => setNewDocNome(e.target.value)}
+                            placeholder="Ex: Laudo Neuropsicológico Dr. Carlos"
+                            className="w-full px-3 py-2 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                            Categoria do Documento
+                          </label>
+                          <select
+                            value={newDocCategoria}
+                            onChange={(e) => setNewDocCategoria(e.target.value as CategoriaDocumentoAnexo)}
+                            className="w-full px-3 py-2 rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          >
+                            <option value="Laudo Médico / Avaliação">📋 Laudo Médico / Avaliação</option>
+                            <option value="Relatório / Histórico Escolar">🏫 Relatório / Histórico Escolar</option>
+                            <option value="Exame Clínico / Audiometria">🔬 Exame Clínico / Audiometria</option>
+                            <option value="Documento Pessoal (RG / Certidão / SUS)">🪪 Documento Pessoal (RG / Certidão / SUS)</option>
+                            <option value="Termo de Consentimento / Contrato">📝 Termo de Consentimento / Contrato</option>
+                            <option value="Atividade / Produção Gráfica">🎨 Atividade / Produção Gráfica</option>
+                            <option value="Outro">📎 Outro</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                          Observações Clínicas sobre o Documento (opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={newDocDescricao}
+                          onChange={(e) => setNewDocDescricao(e.target.value)}
+                          placeholder="Ex: Conclusão diagnóstica de TDAH; solicitar adaptação curricular na escola."
+                          className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+
+                      <div className="flex justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddDocOpen(false);
+                            setNewDocFile(null);
+                          }}
+                          className="px-3.5 py-1.5 rounded-xl bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-300 cursor-pointer"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveNewDoc}
+                          disabled={!newDocFile}
+                          className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                        >
+                          <FileCheck className="w-3.5 h-3.5" />
+                          <span>Salvar Anexo</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Category Filter Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 text-xs">
+                    {[
+                      'Todas',
+                      'Laudo Médico / Avaliação',
+                      'Relatório / Histórico Escolar',
+                      'Exame Clínico / Audiometria',
+                      'Documento Pessoal (RG / Certidão / SUS)',
+                      'Termo de Consentimento / Contrato',
+                      'Atividade / Produção Gráfica',
+                      'Outro'
+                    ].map((cat) => {
+                      const count = cat === 'Todas'
+                        ? (selectedPatient.documentos || []).length
+                        : (selectedPatient.documentos || []).filter(d => d.categoria === cat).length;
+                      if (cat !== 'Todas' && count === 0) return null;
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => setDocFilterCategory(cat)}
+                          className={`px-2.5 py-1 rounded-xl whitespace-nowrap font-medium transition-colors cursor-pointer ${
+                            docFilterCategory === cat
+                              ? 'bg-stone-900 text-white dark:bg-stone-100 dark:text-stone-900 font-bold'
+                              : 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-700'
+                          }`}
+                        >
+                          {cat} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Documents List */}
+                  {(() => {
+                    const filteredDocs = (selectedPatient.documentos || []).filter(d => {
+                      if (docFilterCategory === 'Todas') return true;
+                      return d.categoria === docFilterCategory;
+                    });
+
+                    if (filteredDocs.length === 0) {
+                      return (
+                        <div className="p-8 text-center rounded-2xl bg-stone-50 dark:bg-stone-800/40 border border-stone-200 dark:border-stone-800 space-y-2">
+                          <Paperclip className="w-8 h-8 mx-auto text-stone-400 dark:text-stone-500" />
+                          <p className="text-xs font-bold text-stone-700 dark:text-stone-300">
+                            Nenhum documento anexado {docFilterCategory !== 'Todas' ? `na categoria "${docFilterCategory}"` : 'ao prontuário deste paciente'}.
+                          </p>
+                          <p className="text-[11px] text-stone-400 max-w-sm mx-auto">
+                            Você pode anexar laudos médicos, exames de neuropsicologia, históricos escolares ou fotos de atividades.
+                          </p>
+                          {podeGerenciarPacientes && !isAddDocOpen && (
+                            <button
+                              onClick={() => setIsAddDocOpen(true)}
+                              className="mt-2 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Anexar Primeiro Documento
+                            </button>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 gap-2.5">
+                        {filteredDocs.map((doc) => {
+                          const isPdf = doc.tipo?.includes('pdf') || doc.nome.toLowerCase().endsWith('.pdf');
+                          const isImg = doc.tipo?.includes('image') || /\.(jpg|jpeg|png|webp|gif)$/i.test(doc.nome);
+
+                          return (
+                            <div
+                              key={doc.id}
+                              className="p-3.5 rounded-2xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-850 hover:border-emerald-500/40 shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                            >
+                              <div className="flex items-start gap-3 min-w-0">
+                                <div
+                                  className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs flex-shrink-0 ${
+                                    isPdf
+                                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300'
+                                      : isImg
+                                      ? 'bg-sky-100 text-sky-700 dark:bg-sky-950/70 dark:text-sky-300'
+                                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300'
+                                  }`}
+                                >
+                                  {isPdf ? 'PDF' : isImg ? 'IMG' : 'DOC'}
+                                </div>
+
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h5 className="font-bold text-xs sm:text-sm text-stone-900 dark:text-stone-100 truncate">
+                                      {doc.nome}
+                                    </h5>
+                                    {doc.categoria && (
+                                      <span
+                                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${getDocBadgeColor(doc.categoria)}`}
+                                      >
+                                        {doc.categoria}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400 mt-1 flex-wrap">
+                                    <span>Tamanho: {formatarTamanho(doc.tamanho)}</span>
+                                    <span>•</span>
+                                    <span>Enviado em: {formatarData(doc.dataUpload)}</span>
+                                    {doc.enviadoPor && (
+                                      <>
+                                        <span>•</span>
+                                        <span>Por: {doc.enviadoPor}</span>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  {doc.descricao && (
+                                    <p className="text-xs text-stone-600 dark:text-stone-300 mt-1.5 p-2 rounded-lg bg-stone-50 dark:bg-stone-800/60 border border-stone-200/60 dark:border-stone-700/60">
+                                      <strong>Obs:</strong> {doc.descricao}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 self-end sm:self-center flex-shrink-0">
+                                {doc.url && (
+                                  <button
+                                    onClick={() => setPreviewDoc(doc)}
+                                    className="px-2.5 py-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Visualizar documento"
+                                  >
+                                    <Eye className="w-3.5 h-3.5 text-stone-500" />
+                                    <span>Visualizar</span>
+                                  </button>
+                                )}
+
+                                {doc.url && (
+                                  <a
+                                    href={doc.url}
+                                    download={doc.nome}
+                                    className="px-2.5 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                                    title="Baixar para o computador"
+                                  >
+                                    <Download className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Baixar</span>
+                                  </a>
+                                )}
+
+                                {podeGerenciarPacientes && (
+                                  <button
+                                    onClick={() => handleRemoveDoc(doc.id, doc.nome)}
+                                    className="p-1.5 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                                    title="Excluir documento"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -1278,6 +1763,61 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                 </div>
               </div>
 
+              {/* Document Attachments in Registration Form */}
+              <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-700/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Paperclip className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                    <span className="text-xs font-bold text-stone-900 dark:text-stone-100">
+                      Anexar Documentos no Cadastro
+                    </span>
+                    <span className="text-[10px] text-stone-500">({formDocumentos.length} anexado{formDocumentos.length === 1 ? '' : 's'})</span>
+                  </div>
+
+                  <label className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold inline-flex items-center gap-1 cursor-pointer shadow-2xs transition-all">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>+ Adicionar Arquivo</span>
+                    <input
+                      type="file"
+                      accept=".pdf,image/*,.doc,.docx,.txt"
+                      onChange={handleAddFormDocument}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {formDocumentos.length > 0 ? (
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {formDocumentos.map((doc, idx) => (
+                      <div
+                        key={doc.id || idx}
+                        className="p-2 rounded-xl bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-700/80 flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300">
+                            {doc.tipo?.includes('pdf') ? 'PDF' : doc.tipo?.includes('image') ? 'IMG' : 'DOC'}
+                          </span>
+                          <span className="font-semibold text-stone-800 dark:text-stone-200 truncate">{doc.nome}</span>
+                          <span className="text-[10px] text-stone-400">({formatarTamanho(doc.tamanho)})</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFormDocument(doc.id)}
+                          className="text-stone-400 hover:text-rose-500 p-1 cursor-pointer"
+                          title="Remover anexo"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-stone-400 dark:text-stone-500 italic">
+                    Opcional: Você pode anexar laudos anteriores, exames ou documentos de identificação aqui ou posteriormente no prontuário.
+                  </p>
+                )}
+              </div>
+
               <div className="pt-4 border-t border-stone-200 dark:border-stone-800 flex justify-end gap-2">
                 <button
                   type="button"
@@ -1294,6 +1834,87 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Document Preview Modal */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-stone-950/80 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 bg-stone-50 dark:bg-stone-800/80 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Paperclip className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-bold text-stone-900 dark:text-stone-100 truncate">
+                    {previewDoc.nome}
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-stone-500 flex-wrap">
+                    {previewDoc.categoria && <span>{previewDoc.categoria}</span>}
+                    <span>•</span>
+                    <span>{formatarTamanho(previewDoc.tamanho)}</span>
+                    <span>•</span>
+                    <span>{formatarData(previewDoc.dataUpload)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {previewDoc.url && (
+                  <a
+                    href={previewDoc.url}
+                    download={previewDoc.nome}
+                    className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Baixar Arquivo</span>
+                  </a>
+                )}
+                <button
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-1.5 rounded-xl text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Preview Body */}
+            <div className="flex-1 overflow-auto p-4 sm:p-6 bg-stone-100 dark:bg-stone-950 flex items-center justify-center min-h-[50vh]">
+              {previewDoc.tipo?.includes('pdf') || previewDoc.nome.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewDoc.url}
+                  className="w-full h-[70vh] rounded-2xl bg-white border border-stone-200 dark:border-stone-800 shadow-md"
+                  title={previewDoc.nome}
+                />
+              ) : previewDoc.tipo?.includes('image') || /\.(jpg|jpeg|png|webp|gif)$/i.test(previewDoc.nome) ? (
+                <img
+                  src={previewDoc.url}
+                  alt={previewDoc.nome}
+                  className="max-h-[70vh] max-w-full rounded-2xl object-contain shadow-md mx-auto"
+                />
+              ) : (
+                <div className="text-center py-12 space-y-3">
+                  <FileText className="w-16 h-16 mx-auto text-stone-400" />
+                  <p className="text-sm font-bold text-stone-700 dark:text-stone-300">
+                    Pré-visualização direta não disponível para este formato.
+                  </p>
+                  <p className="text-xs text-stone-500">
+                    Você pode baixar o arquivo original clicando no botão abaixo:
+                  </p>
+                  {previewDoc.url && (
+                    <a
+                      href={previewDoc.url}
+                      download={previewDoc.nome}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold text-xs shadow-xs"
+                    >
+                      <Download className="w-4 h-4" /> Baixar {previewDoc.nome}
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
