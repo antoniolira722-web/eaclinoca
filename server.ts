@@ -438,18 +438,16 @@ app.post('/api/clientes', async (req, res) => {
       id: (resultado as any).insertId
     });
   } catch (erro: any) {
-    console.error('Erro ao salvar cliente:', erro.message);
-
-    if (erro.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({
-        sucesso: false,
-        erro: 'Este e-mail já está cadastrado'
-      });
-    }
+    console.error('ERRO_REAL_BANCO:', {
+      code: erro?.code,
+      errno: erro?.errno,
+      sqlState: erro?.sqlState,
+      message: erro?.message
+    });
 
     res.status(500).json({
       sucesso: false,
-      erro: 'Não foi possível salvar o cadastro'
+      erro: 'Erro interno ao salvar cadastro'
     });
   }
 });
