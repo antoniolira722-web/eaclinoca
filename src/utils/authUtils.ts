@@ -161,7 +161,7 @@ export const DEFAULT_USUARIOS_SISTEMA: UsuarioSistema[] = [
     cargo: 'Psicopedagoga Responsável & Gestora',
     nivelAcesso: 'admin',
     ativo: true,
-    avatarColor: 'bg-rose-600',
+    avatarColor: 'bg-[#C07A60]',
     criadoEm: '2025-01-10',
     ultimoAcesso: new Date().toISOString()
   },

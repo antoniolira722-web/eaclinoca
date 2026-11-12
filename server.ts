@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import mysql from 'mysql2/promise';
 
 // Ignore benign WebSocket/HMR port conflicts in dev environment
 process.on('uncaughtException', (err: any) => {
@@ -16,6 +17,32 @@ const app = express();
 const PORT = Number(process.env.PORT) || (process.env.NODE_ENV === 'production' ? 8080 : 3000);
 
 app.use(express.json({ limit: '10mb' }));
+
+// MariaDB Connection Pool (Hostinger Database)
+const db = mysql.createPool({
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'u395389377_lirauser',
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME || 'u395389377_liraapp',
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0
+});
+
+async function verificarBanco() {
+  try {
+    await db.query('SELECT 1');
+    console.log('Conexão com o MariaDB estabelecida');
+  } catch (erro) {
+    console.error('Erro ao conectar ao MariaDB:', erro);
+    throw erro;
+  }
+}
+
+verificarBanco().catch(() => {
+  console.error('A aplicação iniciou sem conseguir acessar o banco');
+});
 
 // In-memory data store with file persistence fallback
 const DATA_DIR = path.join(process.cwd(), '.data');
@@ -386,6 +413,62 @@ app.post('/api/reset-demo/:syncCode?', (req, res) => {
   };
   saveClinicData(syncCode, fresh);
   res.json({ success: true, message: 'Dados restaurados com sucesso', data: fresh });
+});
+
+// Rota para salvar clientes no MariaDB (Hostinger)
+app.post('/api/clientes', async (req, res) => {
+  try {
+    const { nome, email, telefone } = req.body;
+
+    if (!nome || !email) {
+      return res.status(400).json({
+        sucesso: false,
+        erro: 'Nome e e-mail são obrigatórios'
+      });
+    }
+
+    const [resultado] = await db.execute(
+      `INSERT INTO clientes (nome, email, telefone)
+       VALUES (?, ?, ?)`,
+      [nome, email, telefone || null]
+    );
+
+    res.status(201).json({
+      sucesso: true,
+      id: (resultado as any).insertId
+    });
+  } catch (erro: any) {
+    console.error('Erro ao salvar cliente:', erro.message);
+
+    if (erro.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({
+        sucesso: false,
+        erro: 'Este e-mail já está cadastrado'
+      });
+    }
+
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível salvar o cadastro'
+    });
+  }
+});
+
+// Rota para listar clientes do MariaDB
+app.get('/api/clientes', async (req, res) => {
+  try {
+    const [resultado] = await db.query('SELECT id, nome, email, telefone FROM clientes ORDER BY id DESC');
+    res.json({
+      sucesso: true,
+      clientes: resultado
+    });
+  } catch (erro: any) {
+    console.error('Erro ao listar clientes:', erro.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível buscar clientes'
+    });
+  }
 });
 
 // Start server with Vite or static handler

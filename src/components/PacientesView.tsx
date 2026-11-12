@@ -280,6 +280,33 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
         setActiveDetailPatient({ ...editingPatient, ...payload, documentos: formDocumentos });
       }
     } else {
+      // Gravar no MariaDB da Hostinger (tabela clientes)
+      if (formNome.trim() && formEmail.trim()) {
+        try {
+          const resposta = await fetch('/api/clientes', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              nome: formNome.trim(),
+              email: formEmail.trim(),
+              telefone: formFone.trim() || null
+            })
+          });
+
+          const resultado = await resposta.json();
+
+          if (!resposta.ok) {
+            console.warn('Aviso MariaDB:', resultado.erro || 'Erro ao gravar no MariaDB');
+          } else {
+            console.log('Cadastro salvo com ID no MariaDB:', resultado.id);
+          }
+        } catch (err: any) {
+          console.warn('Aviso: endpoint MariaDB offline ou em ambiente de desenvolvimento local:', err.message);
+        }
+      }
+
       await addPaciente(payload);
     }
 
@@ -1687,6 +1714,20 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
                     value={formFone}
                     onChange={(e) => setFormFone(e.target.value)}
                     placeholder="(11) 98765-4321"
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                    E-mail (Obrigatório para MariaDB) *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="exemplo@email.com"
                     className="w-full px-3 py-2 text-xs rounded-xl bg-stone-50 dark:bg-stone-800 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100"
                   />
                 </div>

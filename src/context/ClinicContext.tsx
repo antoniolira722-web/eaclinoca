@@ -863,6 +863,24 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const addPaciente = async (p: Omit<Paciente, 'id'>): Promise<string> => {
     const id = `pac_${Date.now()}`;
     const novo: Paciente = { id, ...p };
+
+    // Gravação no MariaDB da Hostinger (tabela clientes)
+    if (novo.nome && novo.email) {
+      try {
+        await fetch('/api/clientes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nome: novo.nome,
+            email: novo.email,
+            telefone: novo.fone || null
+          })
+        });
+      } catch (err) {
+        console.warn('Gravação em /api/clientes MariaDB ignorada em modo local/offline:', err);
+      }
+    }
+
     setState(prev => {
       const next = { ...prev, pacientes: [novo, ...prev.pacientes] };
       queueSync(next);

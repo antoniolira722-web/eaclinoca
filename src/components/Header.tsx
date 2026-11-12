@@ -94,7 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
     : INFO_NIVEIS_ACESSO.psicopedagogo;
 
   return (
-    <header className="sticky top-0 z-30 bg-stone-50/95 dark:bg-stone-900/95 backdrop-blur-md border-b border-stone-200 dark:border-stone-800 transition-colors">
+    <header className="sticky top-0 z-30 bg-[#FAF5EE]/95 dark:bg-stone-900/95 backdrop-blur-md border-b border-[#EFE7DC] dark:border-stone-800 transition-colors">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-15 sm:h-16 flex items-center justify-between gap-2 sm:gap-3">
         {/* Left: Mobile Menu Toggle & Search Bar */}
         <div className="flex items-center gap-2 sm:gap-3 flex-1 max-w-md min-w-0">
@@ -102,21 +102,21 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-mobile-menu-toggle"
             onClick={toggleSidebar}
-            className="md:hidden p-2 -ml-1 rounded-xl text-stone-700 dark:text-stone-300 hover:bg-stone-200/70 dark:hover:bg-stone-800 transition-colors cursor-pointer flex-shrink-0"
+            className="md:hidden p-2 -ml-1 rounded-2xl text-stone-700 dark:text-stone-300 hover:bg-[#EFE7DC] dark:hover:bg-stone-800 transition-colors cursor-pointer flex-shrink-0"
             aria-label={isSidebarOpen ? "Fechar menu" : "Abrir menu"}
           >
             {isSidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
 
           <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-stone-400 dark:text-stone-500" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9C9181] dark:text-stone-500" />
             <input
               id="global-search-input"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Buscar paciente, sessão..."
-              className="w-full pl-9 pr-7 sm:pr-8 py-1.5 text-xs sm:text-sm rounded-xl bg-white dark:bg-stone-800/80 border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 transition-all"
+              className="w-full pl-9 pr-7 sm:pr-8 py-2 text-xs sm:text-sm rounded-2xl bg-white dark:bg-stone-800/80 border border-[#E5DAC8] dark:border-stone-700 text-stone-900 dark:text-stone-100 placeholder-[#9C9181] focus:outline-none focus:ring-2 focus:ring-[#5B826E]/30 focus:border-[#5B826E] transition-all shadow-xs"
             />
             {searchQuery && (
               <button
@@ -136,12 +136,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-cloud-sync-status"
             onClick={handleCloudClick}
-            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl text-xs font-medium border shadow-xs transition-all ${
               syncState === 'synced'
-                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100'
+                ? 'bg-white/90 dark:bg-stone-800/90 border-[#E5DAC8] dark:border-stone-700 text-stone-800 dark:text-stone-200 hover:bg-white'
                 : syncState === 'syncing' || isSyncingManual
                 ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 animate-pulse'
-                : 'bg-stone-100 dark:bg-stone-800 border-stone-200 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-200'
+                : 'bg-white/90 dark:bg-stone-800 border-[#E5DAC8] dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:bg-white'
             }`}
             title={`Sincronização em Nuvem: ${syncCode} - Clique para configurar`}
           >
@@ -165,14 +165,14 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             id="btn-toggle-theme"
             onClick={toggleTheme}
-            className="p-2 rounded-xl text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700/80 transition-colors"
+            className="p-2 rounded-2xl text-[#8C6D3B] dark:text-amber-400 bg-[#F4E8D7] dark:bg-stone-800 hover:bg-[#EBDEC8] dark:hover:bg-stone-700 border border-[#E5DAC8] dark:border-stone-700/80 shadow-xs transition-colors"
             title={`Alternar modo (${resolvedTheme === 'dark' ? 'Ativar Claro' : 'Ativar Escuro'})`}
             aria-label="Alternar modo escuro"
           >
             {resolvedTheme === 'dark' ? (
               <Sun className="w-4 h-4 text-amber-400" />
             ) : (
-              <Moon className="w-4 h-4 text-stone-600" />
+              <Moon className="w-4 h-4 text-[#8C6D3B]" />
             )}
           </button>
 
@@ -181,13 +181,13 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               id="btn-notifications-bell"
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2 rounded-xl text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 border border-stone-200 dark:border-stone-700/80 transition-colors"
+              className="relative p-2 rounded-2xl text-stone-700 dark:text-stone-300 bg-white/90 hover:bg-white dark:bg-stone-800 dark:hover:bg-stone-700 border border-[#E5DAC8] dark:border-stone-700/80 shadow-xs transition-colors"
               title="Notificações & Lembretes"
               aria-label="Notificações"
             >
               <Bell className="w-4 h-4" />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-white dark:ring-stone-900">
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[#E54848] px-1 text-[10px] font-bold text-white shadow-xs ring-2 ring-white dark:ring-stone-900">
                   {unreadCount > 9 ? '9+' : unreadCount}
                 </span>
               )}
@@ -342,27 +342,25 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* User Profile Menu & Access Level */}
-          <div className="relative pl-1 sm:pl-2 border-l border-stone-200 dark:border-stone-800">
+          <div className="relative pl-1 sm:pl-2 border-l border-[#E5DAC8] dark:border-stone-800">
             <button
               id="btn-user-profile-menu"
               onClick={() => setShowUserMenu(!showUserMenu)}
-              className="flex items-center gap-2 p-1 sm:px-2 sm:py-1 rounded-2xl hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors cursor-pointer text-left"
+              className="flex items-center gap-2.5 p-1 sm:px-2.5 sm:py-1 rounded-2xl hover:bg-white/80 dark:hover:bg-stone-800 transition-colors cursor-pointer text-left"
               title="Perfil do Usuário e Nível de Acesso"
             >
               <div
-                className={`w-8 h-8 rounded-full ${
-                  currentUser?.avatarColor || 'bg-emerald-600'
-                } text-white flex items-center justify-center font-bold text-xs shadow-sm flex-shrink-0`}
+                className="w-8 h-8 rounded-full bg-[#C07A60] text-white flex items-center justify-center font-bold text-xs shadow-xs flex-shrink-0"
               >
-                {currentUser?.nome ? currentUser.nome.charAt(0).toUpperCase() : 'U'}
+                {currentUser?.nome ? currentUser.nome.charAt(0).toUpperCase() : 'E'}
               </div>
 
               <div className="hidden lg:block">
                 <div className="flex items-center gap-1.5">
                   <span className="text-xs font-bold text-stone-900 dark:text-stone-100 leading-tight">
-                    {currentUser?.nome || 'Usuário'}
+                    {currentUser?.nome || 'Ester Lopes (Admin)'}
                   </span>
-                  <span className="text-[11px]">{nivelInfo.icone}</span>
+                  <span className="text-[11px]">👑</span>
                 </div>
                 <span className="text-[10px] text-stone-500 dark:text-stone-400 block leading-tight">
                   {nivelInfo.nome.split('/')[0].trim()}

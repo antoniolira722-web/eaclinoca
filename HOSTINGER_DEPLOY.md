@@ -83,7 +83,32 @@ Se você estiver utilizando hospedagem compartilhada tradicional da Hostinger (a
 
 ---
 
+## Configuração do Banco de Dados MariaDB (Hostinger)
+
+A aplicação está configurada para gravar os cadastros de clientes/pacientes diretamente no banco MariaDB existente da Hostinger:
+
+* **Banco:** `u395389377_liraapp`
+* **Usuário:** `u395389377_lirauser`
+* **Host:** `127.0.0.1`
+* **Porta:** `3306`
+* **Tabela:** `clientes` (colunas: `id`, `nome`, `email`, `telefone`)
+
+### Variáveis de Ambiente no Painel da Hostinger:
+Adicione no painel Node.js / Gerenciador de Variáveis:
+```env
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=u395389377_liraapp
+DB_USER=u395389377_lirauser
+DB_PASSWORD=SUA_SENHA_DO_USUARIO_DO_BANCO
+NODE_ENV=production
+```
+*(Nota: Nunca salve a senha real no código ou no GitHub)*.
+
+---
+
 ## Sincronização em Tempo Real na Nuvem
 
 - O banco de dados **Firebase Firestore** já está configurado no arquivo `firebase-applet-config.json` (`ai-studio-eaclinoca-b40440f0-3b82-4346-894f-2b9c526d781d`).
 - Todas as alterações feitas pelos celulares e computadores conectados na Hostinger sincronizam automaticamente na nuvem em tempo real.
+

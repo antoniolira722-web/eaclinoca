@@ -83,29 +83,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Header Banner */}
-      <div className="bg-gradient-to-r from-emerald-900 via-stone-900 to-stone-900 text-white rounded-3xl p-6 sm:p-8 shadow-sm relative overflow-hidden border border-emerald-950">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-1.5">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-semibold backdrop-blur-sm border border-emerald-500/30">
-              <Sparkles className="w-3.5 h-3.5" />
+    <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-200">
+      {/* Hero / Quick Action Banner */}
+      <div className="relative overflow-hidden rounded-[28px] bg-[#FDEFD9] dark:bg-stone-900 border border-[#F3E0C8] dark:border-stone-800 p-6 sm:p-7 shadow-xs text-stone-900">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+          {/* Greeting info */}
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0E4238] text-emerald-300 text-xs font-semibold mb-2.5 shadow-xs">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-300" />
               <span>Painel Clínico Inteligente</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-[#1A2E26] dark:text-white">
               Olá, {state.configuracoes.profissional.split(' ')[0]} 👋
             </h1>
-            <p className="text-stone-300 text-sm capitalize">
+            <p className="text-[#6D6050] dark:text-stone-400 text-xs sm:text-sm mt-1 capitalize font-medium">
               {dataHojeFormatada}
             </p>
           </div>
 
           {/* Quick Action Buttons */}
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
             <button
               id="btn-quick-new-patient"
               onClick={onOpenNewPatient}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-all shadow-sm shadow-emerald-950/50 cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-[#557F69] hover:bg-[#476D59] text-white text-xs sm:text-sm font-semibold transition-all shadow-xs cursor-pointer"
+              title="Cadastrar novo paciente"
             >
               <Plus className="w-4 h-4" />
               <span>Novo Paciente</span>
@@ -113,7 +115,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="btn-quick-new-appointment"
               onClick={onOpenNewAppointment}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm border border-white/15 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/90 hover:bg-white text-stone-800 text-xs sm:text-sm font-medium border border-[#D5C7B3] shadow-2xs transition-all cursor-pointer"
+              title="Novo agendamento na agenda"
             >
               <Calendar className="w-4 h-4" />
               <span>Agendar</span>
@@ -121,7 +124,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="btn-quick-new-session"
               onClick={() => onOpenNewSession()}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm border border-white/15 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/90 hover:bg-white text-stone-800 text-xs sm:text-sm font-medium border border-[#D5C7B3] shadow-2xs transition-all cursor-pointer"
+              title="Registrar evolução de sessão"
             >
               <FileText className="w-4 h-4" />
               <span>Evolução</span>
@@ -129,7 +133,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="btn-quick-new-report"
               onClick={() => onOpenRelatorio()}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm border border-white/15 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/90 hover:bg-white text-stone-800 text-xs sm:text-sm font-medium border border-[#D5C7B3] shadow-2xs transition-all cursor-pointer"
+              title="Gerar laudo ou parecer"
             >
               <FileBarChart className="w-4 h-4" />
               <span>Laudo / Relatório</span>
@@ -137,7 +142,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <button
               id="btn-quick-new-reminder"
               onClick={onOpenNewReminder}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur-sm border border-white/15 transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white/90 hover:bg-white text-stone-800 text-xs sm:text-sm font-medium border border-[#D5C7B3] shadow-2xs transition-all cursor-pointer"
+              title="Criar novo lembrete"
             >
               <Clock className="w-4 h-4" />
               <span>Lembrete</span>
@@ -151,107 +157,103 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Card 1: Pacientes */}
         <div
           onClick={() => setActiveTab('pacientes')}
-          className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-emerald-500/50 transition-all cursor-pointer group"
+          className="bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[24px] p-5 shadow-xs hover:border-[#557F69] transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
+            <span className="text-xs sm:text-sm font-medium text-stone-700 dark:text-stone-300">
               Pacientes Ativos
             </span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+            <div className="p-2 rounded-full bg-[#DCE7DF] dark:bg-emerald-950/60 text-[#48735C] dark:text-emerald-400">
               <Users className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-stone-900 dark:text-stone-100">
+            <span className="text-3xl font-extrabold text-stone-900 dark:text-stone-100">
               {pacientesAtivos}
             </span>
-            <span className="text-xs text-stone-400">
+            <span className="text-xs text-stone-500">
               de {state.pacientes.length} total
             </span>
           </div>
-          <div className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium group-hover:underline">
-            Ver prontuários <ArrowRight className="w-3 h-3" />
+          <div className="mt-2 text-xs text-[#48735C] dark:text-emerald-400 flex items-center gap-1 font-semibold group-hover:underline">
+            Ver prontuários <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </div>
 
         {/* Card 2: Atendimentos Hoje */}
         <div
           onClick={() => setActiveTab('agenda')}
-          className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-emerald-500/50 transition-all cursor-pointer group"
+          className="bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[24px] p-5 shadow-xs hover:border-[#557F69] transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
+            <span className="text-xs sm:text-sm font-medium text-stone-700 dark:text-stone-300">
               Agenda Hoje
             </span>
-            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 dark:text-blue-400">
+            <div className="p-2 rounded-full bg-[#DCE7DF] dark:bg-emerald-950/60 text-[#48735C] dark:text-emerald-400">
               <Calendar className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-stone-900 dark:text-stone-100">
+            <span className="text-3xl font-extrabold text-stone-900 dark:text-stone-100">
               {atendimentosHoje.length}
             </span>
-            <span className="text-xs text-stone-400">
-              ({atendimentosHojeConcluidos} concluído{atendimentosHojeConcluidos !== 1 ? 's' : ''})
+            <span className="text-xs text-stone-500">
+              ({atendimentosHojeConcluidos} concluídos)
             </span>
           </div>
-          <div className="mt-2 text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium group-hover:underline">
-            Abrir agenda <ArrowRight className="w-3 h-3" />
+          <div className="mt-2 text-xs text-[#48735C] dark:text-emerald-400 flex items-center gap-1 font-semibold group-hover:underline">
+            Abrir agenda <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </div>
 
         {/* Card 3: Reavaliações & Planos */}
         <div
           onClick={() => setActiveTab('planos')}
-          className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-emerald-500/50 transition-all cursor-pointer group"
+          className="bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[24px] p-5 shadow-xs hover:border-[#557F69] transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
+            <span className="text-xs sm:text-sm font-medium text-stone-700 dark:text-stone-300">
               Planos & Reavaliações
             </span>
-            <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400">
+            <div className="p-2 rounded-full bg-[#DCE7DF] dark:bg-emerald-950/60 text-[#48735C] dark:text-emerald-400">
               <Target className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-stone-900 dark:text-stone-100">
+            <span className="text-3xl font-extrabold text-stone-900 dark:text-stone-100">
               {state.planos.length}
             </span>
-            {planosAVencer.length > 0 ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                {planosAVencer.length} a vencer
-              </span>
-            ) : (
-              <span className="text-xs text-stone-400">em dia</span>
-            )}
+            <span className="text-xs text-stone-500">
+              {planosAVencer.length > 0 ? `${planosAVencer.length} a vencer` : 'em dia'}
+            </span>
           </div>
-          <div className="mt-2 text-[11px] text-purple-600 dark:text-purple-400 flex items-center gap-1 font-medium group-hover:underline">
-            Gerenciar PEI <ArrowRight className="w-3 h-3" />
+          <div className="mt-2 text-xs text-[#48735C] dark:text-emerald-400 flex items-center gap-1 font-semibold group-hover:underline">
+            Gerenciar PEI <ArrowRight className="w-3.5 h-3.5" />
           </div>
         </div>
 
-        {/* Card 4: Financeiro do Mês */}
+        {/* Card 4: Financeiro do Mês (Pastel blush/terracotta tint) */}
         <div
           onClick={() => setActiveTab('financeiro')}
-          className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-2xl p-4 sm:p-5 shadow-xs hover:border-emerald-500/50 transition-all cursor-pointer group"
+          className="bg-[#F8EAE4] dark:bg-stone-900 border border-[#EAD5CD] dark:border-stone-800 rounded-[24px] p-5 shadow-xs hover:border-[#A85842] transition-all cursor-pointer group"
         >
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-500 dark:text-stone-400">
+            <span className="text-xs sm:text-sm font-medium text-stone-800 dark:text-stone-300">
               Financeiro ({compAtual})
             </span>
-            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+            <div className="p-2 rounded-full bg-[#F0D5CB] dark:bg-rose-950/60 text-[#A85842] dark:text-rose-400">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
           <div className="mt-3 flex items-baseline gap-1.5">
-            <span className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-stone-100">
+            <span className="text-2xl sm:text-3xl font-extrabold text-[#A85842] dark:text-rose-300">
               {formatarMoeda(recebidoMes)}
             </span>
           </div>
-          <div className="mt-1 flex items-center justify-between text-[11px] text-stone-400">
+          <div className="mt-2 flex items-center justify-between text-xs text-[#A85842]/80 dark:text-rose-400/80 font-medium">
             <span>Total: {formatarMoeda(totalMes)}</span>
             {atrasados.length > 0 && (
-              <span className="text-rose-500 font-semibold">{atrasados.length} em atraso</span>
+              <span className="text-rose-600 font-bold">{atrasados.length} em atraso</span>
             )}
           </div>
         </div>
@@ -260,10 +262,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Main Grid: Atendimentos de Hoje + Alertas & Lembretes */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Atendimentos de Hoje (2 cols) */}
-        <div className="lg:col-span-2 bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-5 sm:p-6 shadow-xs">
+        <div className="lg:col-span-2 bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[26px] p-5 sm:p-6 shadow-xs">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
+              <div className="p-2 rounded-full bg-[#DCE7DF] dark:bg-emerald-950/60 text-[#48735C] dark:text-emerald-400">
                 <Calendar className="w-4 h-4" />
               </div>
               <div>
@@ -271,30 +273,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   Atendimentos de Hoje
                 </h2>
                 <p className="text-xs text-stone-500">
-                  {atendimentosHoje.length} agendamento{atendimentosHoje.length !== 1 ? 's' : ''} programado{atendimentosHoje.length !== 1 ? 's' : ''}
+                  {atendimentosHoje.length} agendamentos programados
                 </p>
               </div>
             </div>
             <button
               onClick={() => setActiveTab('agenda')}
-              className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+              className="text-xs font-semibold text-[#48735C] dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
             >
               Ver agenda completa <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {atendimentosHoje.length === 0 ? (
-            <div className="py-12 text-center rounded-2xl border border-dashed border-stone-200 dark:border-stone-800 p-6">
-              <Calendar className="w-8 h-8 mx-auto text-stone-300 dark:text-stone-600 mb-2" />
-              <p className="text-sm font-medium text-stone-600 dark:text-stone-300">
+            <div className="py-10 text-center rounded-2xl border border-[#EDE3D6] dark:border-stone-800 p-6 mt-3">
+              <Calendar className="w-9 h-9 mx-auto text-[#BFA07A] dark:text-stone-500 mb-2.5" />
+              <p className="text-sm font-bold text-stone-800 dark:text-stone-200">
                 Nenhum atendimento agendado para hoje.
               </p>
-              <p className="text-xs text-stone-400 mt-1">
+              <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
                 Aproveite para registrar evoluções pendentes ou planejar materiais.
               </p>
               <button
                 onClick={onOpenNewAppointment}
-                className="mt-4 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="mt-4 px-4 py-2 rounded-xl bg-[#557F69] hover:bg-[#476D59] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Agendar Atendimento</span>
@@ -386,24 +388,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         {/* Right Column: Lembretes & Alertas Críticos (1 col) */}
         <div className="space-y-6">
           {/* Lembretes do Dia */}
-          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-5 shadow-xs">
+          <div className="bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[26px] p-6 shadow-xs">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <Clock className="w-4 h-4 text-stone-700 dark:text-stone-300" />
                 <h3 className="font-bold text-sm text-stone-900 dark:text-stone-100">
                   Lembretes Ativos
                 </h3>
               </div>
               <button
                 onClick={onOpenNewReminder}
-                className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold hover:underline flex items-center gap-0.5"
+                className="text-xs text-stone-600 dark:text-stone-400 font-semibold hover:text-stone-900 dark:hover:text-stone-200 flex items-center gap-0.5 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" /> Adicionar
               </button>
             </div>
 
             {lembretesPendentes.length === 0 ? (
-              <p className="text-xs text-stone-400 py-4 text-center">
+              <p className="text-xs text-stone-400 py-6 text-center">
                 Sem lembretes pendentes.
               </p>
             ) : (
@@ -448,9 +450,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {/* Alertas Clínicos & Reavaliações */}
-          <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-5 shadow-xs">
+          <div className="bg-white dark:bg-stone-900 border border-[#EADBCE] dark:border-stone-800 rounded-[26px] p-6 shadow-xs">
             <div className="flex items-center gap-2 mb-3">
-              <AlertCircle className="w-4 h-4 text-amber-500" />
+              <AlertCircle className="w-4 h-4 text-stone-700 dark:text-stone-300" />
               <h3 className="font-bold text-sm text-stone-900 dark:text-stone-100">
                 Alertas Clínicos
               </h3>
@@ -495,7 +497,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     </div>
                     <button
                       onClick={() => marcarPago(f.id)}
-                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold whitespace-nowrap"
+                      className="px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold whitespace-nowrap cursor-pointer"
                     >
                       Receber
                     </button>
@@ -504,8 +506,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               })}
 
               {planosAVencer.length === 0 && atrasados.length === 0 && (
-                <div className="py-4 text-center text-xs text-stone-400">
-                  ✨ Tudo em dia na clínica! Sem pendências urgentes.
+                <div className="py-6 text-center text-xs text-stone-600 dark:text-stone-400 flex items-center justify-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-[#E0A86A]" />
+                  <span>Tudo em dia na clínica! Sem pendências urgentes.</span>
                 </div>
               )}
             </div>
