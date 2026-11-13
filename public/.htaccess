@@ -3,8 +3,9 @@
   RewriteEngine On
   RewriteBase /
   
-  # Do not rewrite existing files or directories
+  # Do not rewrite API routes or existing files/directories
   RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_URI} !^/api/
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteCond %{REQUEST_FILENAME} !-l

@@ -22,6 +22,8 @@ import { DEFAULT_USUARIOS_SISTEMA } from '../utils/authUtils';
 interface ClinicContextType {
   state: ClinicState;
   syncState: SyncState;
+  dbError: string | null;
+  hasLoadedFromServer: boolean;
   lastSyncTime: Date | null;
   syncCode: string;
   searchQuery: string;
@@ -597,11 +599,14 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [state, setState] = useState<ClinicState>(emptyInitialState);
 
   const [syncState, setSyncState] = useState<SyncState>('syncing');
+  const [dbError, setDbError] = useState<string | null>(null);
+  const [hasLoadedFromServer, setHasLoadedFromServer] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const latestStateRef = useRef<ClinicState>(state);
+  const hasLoadedFromServerRef = useRef<boolean>(false);
   const hasPendingLocalChangeRef = useRef(false);
   const lastLocalMutationAtRef = useRef<number>(0);
 
@@ -738,11 +743,30 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     try {
       const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sync-Initialized': hasLoadedFromServerRef.current ? 'true' : 'false'
+        },
         body: JSON.stringify(dataToPush)
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let serverErr = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.erro) serverErr = errJson.erro;
+        } catch {
+          // ignore non-json error body
+        }
+        throw new Error(serverErr);
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('O servidor retornou HTML em vez da API (/api/sync). O backend Node.js não está respondendo nesta URL.');
+      }
       hasPendingLocalChangeRef.current = false;
+      hasLoadedFromServerRef.current = true;
+      setHasLoadedFromServer(true);
+      setDbError(null);
       setSyncState('synced');
       setLastSyncTime(new Date());
       console.log('[TEMP-LOG][FRONTEND_SAVE]', {
@@ -751,9 +775,11 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         registrosSalvos: dataToPush.pacientes?.length || 0
       });
       return true;
-    } catch (backendErr) {
-      console.warn('Falha ao salvar no MariaDB via /api/sync:', backendErr);
+    } catch (backendErr: any) {
+      const msg = backendErr?.message || 'Não foi possível salvar no banco de dados MariaDB';
+      console.warn('Falha ao salvar no MariaDB via /api/sync:', msg);
       hasPendingLocalChangeRef.current = true;
+      setDbError(msg);
       setSyncState('offline');
       return false;
     }
@@ -772,7 +798,20 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         method: 'GET',
         cache: 'no-store'
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) {
+        let serverErr = `HTTP ${res.status}`;
+        try {
+          const errJson = await res.json();
+          if (errJson?.erro) serverErr = errJson.erro;
+        } catch {
+          // ignore non-json error body
+        }
+        throw new Error(serverErr);
+      }
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error('O servidor retornou HTML em vez da API (/api/sync). O backend Node.js não está ativo em /api/*.');
+      }
       const json = await res.json();
       if (json?.data && typeof json.data === 'object') {
         if (isBackgroundPoll && (hasPendingLocalChangeRef.current || Date.now() - lastLocalMutationAtRef.current < 3000)) {
@@ -780,6 +819,9 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         const merged = mergeServerData(json.data as Partial<ClinicState>);
         latestStateRef.current = merged;
+        hasLoadedFromServerRef.current = true;
+        setHasLoadedFromServer(true);
+        setDbError(null);
         setState(merged);
         setSyncState('synced');
         setLastSyncTime(new Date());
@@ -791,8 +833,10 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         return merged;
       }
       return null;
-    } catch (err) {
-      console.warn('Erro ao carregar dados do MariaDB via /api/sync:', err);
+    } catch (err: any) {
+      const msg = err?.message || 'Não foi possível conectar ao banco de dados MariaDB';
+      console.warn('Erro ao carregar dados do MariaDB via /api/sync:', msg);
+      setDbError(msg);
       setSyncState('offline');
       return null;
     }
@@ -800,6 +844,9 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Persist mutation immediately to MariaDB using await
   const commitMutation = useCallback(async (updater: (prev: ClinicState) => ClinicState): Promise<ClinicState> => {
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
     const next = updater(latestStateRef.current);
     latestStateRef.current = next;
     hasPendingLocalChangeRef.current = true;
@@ -811,17 +858,20 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
     await pushToCloud(next, syncCode);
     return next;
-  }, [pushToCloud, syncCode]);
+  }, [pushToCloud, fetchFromServer, syncCode]);
 
-  // Flush pending sync before page unload/visibility change
+  // Flush pending sync before page unload/visibility change (apenas se já carregou do banco)
   useEffect(() => {
     const flushPendingSync = () => {
-      if (hasPendingLocalChangeRef.current) {
+      if (hasPendingLocalChangeRef.current && hasLoadedFromServerRef.current) {
         if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
         const body = JSON.stringify(latestStateRef.current);
         fetch(`/api/sync/${encodeURIComponent(syncCode)}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Sync-Initialized': 'true'
+          },
           body,
           keepalive: body.length < 60000
         }).catch(() => {});
@@ -901,46 +951,69 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // CRUD Implementations
   const addPaciente = async (p: Omit<Paciente, 'id'>): Promise<string> => {
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
+
     const id = `pac_${Date.now()}`;
     const novo: Paciente = { id, ...p };
 
-    try {
-      const resp = await fetch('/api/pacientes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...novo, syncCode })
-      });
-      if (!resp.ok) {
-        console.warn('Falha ao gravar em POST /api/pacientes:', resp.status);
-      }
-    } catch (err) {
-      console.warn('Erro de conexão ao gravar paciente em /api/pacientes:', err);
+    const resp = await fetch('/api/pacientes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...novo, syncCode })
+    });
+
+    const contentType = resp.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const msg = 'O servidor retornou HTML em vez da API (/api/pacientes). O backend Node.js não está ativo nesta hospedagem.';
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
     }
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.sucesso) {
+      const msg = json?.erro || `Não foi possível salvar o paciente no banco de dados (HTTP ${resp.status}).`;
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
+    }
+
+    const pacienteSalvo: Paciente = json?.paciente || novo;
 
     await commitMutation(prev => ({
       ...prev,
-      pacientes: [novo, ...prev.pacientes]
+      pacientes: [pacienteSalvo, ...prev.pacientes.filter(item => item.id !== pacienteSalvo.id)]
     }));
 
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Novo Paciente Cadastrado',
-      mensagem: `${novo.nome} foi adicionado(a) com sucesso ao prontuário.`,
+      mensagem: `${pacienteSalvo.nome} foi adicionado(a) com sucesso ao prontuário.`,
       linkTab: 'pacientes',
-      actionId: id
+      actionId: pacienteSalvo.id
     });
-    return id;
+    return pacienteSalvo.id;
   };
 
   const updatePaciente = async (id: string, p: Partial<Paciente>): Promise<void> => {
-    try {
-      await fetch(`/api/pacientes/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...p, syncCode })
-      });
-    } catch (err) {
-      console.warn('Erro de conexão ao atualizar paciente em /api/pacientes:', err);
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
+
+    const resp = await fetch(`/api/pacientes/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...p, syncCode })
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.sucesso) {
+      const msg = json?.erro || `Não foi possível atualizar o paciente no banco de dados (HTTP ${resp.status}).`;
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
     }
 
     await commitMutation(prev => ({
@@ -950,12 +1023,20 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const deletePaciente = async (id: string): Promise<void> => {
-    try {
-      await fetch(`/api/pacientes/${encodeURIComponent(id)}?syncCode=${encodeURIComponent(syncCode)}`, {
-        method: 'DELETE'
-      });
-    } catch (err) {
-      console.warn('Erro de conexão ao excluir paciente em /api/pacientes:', err);
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
+
+    const resp = await fetch(`/api/pacientes/${encodeURIComponent(id)}?syncCode=${encodeURIComponent(syncCode)}`, {
+      method: 'DELETE'
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.sucesso) {
+      const msg = json?.erro || `Não foi possível excluir o paciente no banco de dados (HTTP ${resp.status}).`;
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
     }
 
     await commitMutation(prev => ({
@@ -973,24 +1054,31 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     pacienteId: string,
     docData: Omit<DocumentoAnexo, 'id' | 'dataUpload'>
   ): Promise<DocumentoAnexo> => {
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
+
     const novoDoc: DocumentoAnexo = {
       id: `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       dataUpload: new Date().toISOString(),
       ...docData
     };
 
-    try {
-      const resp = await fetch(`/api/pacientes/${encodeURIComponent(pacienteId)}/documentos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...novoDoc, syncCode })
-      });
-      if (!resp.ok) {
-        console.warn('Falha ao gravar anexo em POST /api/pacientes/:id/documentos:', resp.status);
-      }
-    } catch (err) {
-      console.warn('Erro de conexão ao gravar anexo em paciente_documentos:', err);
+    const resp = await fetch(`/api/pacientes/${encodeURIComponent(pacienteId)}/documentos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...novoDoc, syncCode })
+    });
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.sucesso) {
+      const msg = json?.erro || `Não foi possível salvar o anexo no banco de dados (HTTP ${resp.status}).`;
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
     }
+
+    const docConfirmado: DocumentoAnexo = json?.documento || novoDoc;
 
     const updated = await commitMutation(prev => ({
       ...prev,
@@ -998,7 +1086,7 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (item.id === pacienteId) {
           return {
             ...item,
-            documentos: [...(item.documentos || []), novoDoc]
+            documentos: [...(item.documentos || []), docConfirmado]
           };
         }
         return item;
@@ -1009,25 +1097,33 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Documento Anexado',
-      mensagem: `Documento "${novoDoc.nome}" foi anexado com sucesso ao prontuário de ${pac?.nome || 'paciente'}.`,
+      mensagem: `Documento "${docConfirmado.nome}" foi anexado com sucesso ao prontuário de ${pac?.nome || 'paciente'}.`,
       linkTab: 'pacientes',
       actionId: pacienteId
     });
 
-    return novoDoc;
+    return docConfirmado;
   };
 
   const removerDocumentoPaciente = async (
     pacienteId: string,
     documentoId: string
   ): Promise<void> => {
-    try {
-      await fetch(
-        `/api/pacientes/${encodeURIComponent(pacienteId)}/documentos/${encodeURIComponent(documentoId)}?syncCode=${encodeURIComponent(syncCode)}`,
-        { method: 'DELETE' }
-      );
-    } catch (err) {
-      console.warn('Erro de conexão ao remover anexo em paciente_documentos:', err);
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+    }
+
+    const resp = await fetch(
+      `/api/pacientes/${encodeURIComponent(pacienteId)}/documentos/${encodeURIComponent(documentoId)}?syncCode=${encodeURIComponent(syncCode)}`,
+      { method: 'DELETE' }
+    );
+
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok || !json?.sucesso) {
+      const msg = json?.erro || `Não foi possível remover o anexo no banco de dados (HTTP ${resp.status}).`;
+      setDbError(msg);
+      setSyncState('offline');
+      throw new Error(msg);
     }
 
     await commitMutation(prev => ({
@@ -1356,6 +1452,10 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const forcarSincronizacao = async (): Promise<void> => {
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    if (!hasLoadedFromServerRef.current) {
+      await fetchFromServer(syncCode, false);
+      return;
+    }
     await pushToCloud(latestStateRef.current, syncCode);
   };
 
@@ -1418,6 +1518,8 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       value={{
         state,
         syncState,
+        dbError,
+        hasLoadedFromServer,
         lastSyncTime,
         syncCode,
         searchQuery,

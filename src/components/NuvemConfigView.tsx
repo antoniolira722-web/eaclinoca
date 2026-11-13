@@ -601,7 +601,7 @@ export const NuvemConfigView: React.FC<NuvemConfigViewProps> = ({ setActiveTab }
                       {syncState === 'synced' && 'Banco de Dados MariaDB (Hostinger) — Sincronizado'}
                       {syncState === 'syncing' && 'Sincronizando com o banco MariaDB...'}
                       {syncState === 'pending' && 'Salvando alterações no banco...'}
-                      {syncState === 'offline' && 'Modo Offline (Salvo Localmente)'}
+                      {syncState === 'offline' && 'Sem conexão com o banco MariaDB (Offline)'}
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
                       Multi-Dispositivo
@@ -752,7 +752,7 @@ export const NuvemConfigView: React.FC<NuvemConfigViewProps> = ({ setActiveTab }
         {/* Global Save Button Bottom Bar */}
         <div className="bg-white dark:bg-stone-900 border border-stone-200 dark:border-stone-800 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs">
           <p className="text-xs text-stone-500">
-            As alterações são salvas localmente e sincronizadas em segundo plano.
+            As alterações são gravadas e sincronizadas diretamente no banco de dados MariaDB.
           </p>
 
           <button

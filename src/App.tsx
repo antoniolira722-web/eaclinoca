@@ -24,6 +24,7 @@ import { NuvemConfigView } from './components/NuvemConfigView';
 
 const MainApp: React.FC = () => {
   const { isAuthenticated, currentUser, canAccessTab } = useAuth();
+  const { syncState, dbError, recarregarDaNuvem } = useClinic();
   const [activeTab, setActiveTab] = useState<TabType>('painel');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [targetPatientId, setTargetPatientId] = useState<string | null>(null);
@@ -85,6 +86,26 @@ const MainApp: React.FC = () => {
 
         {/* Main Content Area */}
         <main className="flex-1 p-3.5 sm:p-6 lg:p-8 pb-24 md:pb-8 overflow-y-auto max-w-full">
+          {syncState === 'offline' && (
+            <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <p className="font-bold">
+                  Sem conexão com o banco de dados MariaDB (Modo Offline)
+                </p>
+                <p className="text-[11px] opacity-90 mt-0.5">
+                  {dbError || 'Os dados existentes não puderam ser carregados e novos cadastros não serão gravados permanentemente até o banco conectar.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => recarregarDaNuvem()}
+                className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold whitespace-nowrap self-start sm:self-center cursor-pointer"
+              >
+                Tentar Reconectar
+              </button>
+            </div>
+          )}
+
           {activeTab === 'painel' && canAccessTab('painel') && (
             <DashboardView
               setActiveTab={setActiveTab}

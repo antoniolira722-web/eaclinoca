@@ -65,7 +65,7 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
   selectedPatientId,
   setSelectedPatientId
 }) => {
-  const { state, addPaciente, updatePaciente, deletePaciente, anexarDocumentoPaciente, removerDocumentoPaciente } = useClinic();
+  const { state, syncState, dbError, recarregarDaNuvem, addPaciente, updatePaciente, deletePaciente, anexarDocumentoPaciente, removerDocumentoPaciente } = useClinic();
   const { hasPermission, currentUser } = useAuth();
 
   const podeGerenciarPacientes = hasPermission('gerenciarPacientes');
@@ -76,6 +76,9 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
   const [categoriaFilter, setCategoriaFilter] = useState<string>('Todas');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Paciente | null>(null);
+  const [isSavingPatient, setIsSavingPatient] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Prontuário / Detailed Patient Modal
   const [activeDetailPatient, setActiveDetailPatient] = useState<Paciente | null>(() => {
@@ -191,10 +194,14 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
     setFormQueixaMamaria('');
     setFormLaserterapiaRealizada(false);
 
+    setFormError(null);
+    setIsSavingPatient(false);
     setIsModalOpen(true);
   };
 
   const openEditModal = (p: Paciente) => {
+    setFormError(null);
+    setIsSavingPatient(false);
     setEditingPatient(p);
     setFormNome(p.nome);
     setFormNasc(p.nasc);
@@ -232,7 +239,10 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
 
   const handleSavePatient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formNome.trim() || !formNasc) return;
+    if (!formNome.trim() || !formNasc || isSavingPatient) return;
+
+    setFormError(null);
+    setIsSavingPatient(true);
 
     const tagsArray = formTagsStr
       .split(',')
@@ -274,50 +284,64 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
       dataInicio: editingPatient?.dataInicio || new Date().toISOString().slice(0, 10)
     };
 
-    if (editingPatient) {
-      await updatePaciente(editingPatient.id, payload);
-      if (activeDetailPatient?.id === editingPatient.id) {
-        setActiveDetailPatient({ ...editingPatient, ...payload, documentos: formDocumentos });
-      }
-    } else {
-      // Gravar no MariaDB da Hostinger (tabela clientes)
-      if (formNome.trim() && formEmail.trim()) {
-        try {
-          const resposta = await fetch('/api/clientes', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              nome: formNome.trim(),
-              email: formEmail.trim(),
-              telefone: formFone.trim() || null
-            })
-          });
-
-          const resultado = await resposta.json();
-
-          if (!resposta.ok) {
-            console.warn('Aviso MariaDB:', resultado.erro || 'Erro ao gravar no MariaDB');
-          } else {
-            console.log('Cadastro salvo com ID no MariaDB:', resultado.id);
-          }
-        } catch (err: any) {
-          console.warn('Aviso: endpoint MariaDB offline ou em ambiente de desenvolvimento local:', err.message);
+    try {
+      if (editingPatient) {
+        await updatePaciente(editingPatient.id, payload);
+        if (activeDetailPatient?.id === editingPatient.id) {
+          setActiveDetailPatient({ ...editingPatient, ...payload, documentos: formDocumentos });
         }
+      } else {
+        // Gravar no MariaDB da Hostinger (tabela clientes) quando e-mail for informado
+        if (formNome.trim() && formEmail.trim()) {
+          try {
+            const resposta = await fetch('/api/clientes', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                nome: formNome.trim(),
+                email: formEmail.trim(),
+                telefone: formFone.trim() || null
+              })
+            });
+
+            const resultado = await resposta.json();
+
+            if (!resposta.ok) {
+              console.warn('Aviso MariaDB:', resultado.erro || 'Erro ao gravar em clientes');
+            } else {
+              console.log('Cadastro salvo com ID no MariaDB:', resultado.id);
+            }
+          } catch (err: any) {
+            console.warn('Aviso /api/clientes:', err.message);
+          }
+        }
+
+        await addPaciente(payload);
       }
 
-      await addPaciente(payload);
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setFormError(
+        err?.message ||
+          'Não foi possível salvar o cadastro no banco de dados MariaDB. Verifique se o servidor está conectado ao banco.'
+      );
+    } finally {
+      setIsSavingPatient(false);
     }
-
-    setIsModalOpen(false);
   };
 
   const handleDelete = async (id: string, nome: string) => {
     if (window.confirm(`Tem certeza que deseja excluir o paciente "${nome}" e todos os seus registros associados?`)) {
-      await deletePaciente(id);
-      if (activeDetailPatient?.id === id) {
-        setActiveDetailPatient(null);
+      setActionError(null);
+      try {
+        await deletePaciente(id);
+        if (activeDetailPatient?.id === id) {
+          setActiveDetailPatient(null);
+        }
+      } catch (err: any) {
+        setActionError(err?.message || 'Erro ao excluir paciente no banco de dados MariaDB.');
       }
     }
   };
@@ -364,21 +388,31 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
       enviadoPor: currentUser?.nome || 'Profissional'
     };
 
-    const saved = await anexarDocumentoPaciente(selectedPatient.id, docPayload);
-    setActiveDetailPatient(prev => prev ? { ...prev, documentos: [...(prev.documentos || []), saved] } : null);
+    setActionError(null);
+    try {
+      const saved = await anexarDocumentoPaciente(selectedPatient.id, docPayload);
+      setActiveDetailPatient(prev => prev ? { ...prev, documentos: [...(prev.documentos || []), saved] } : null);
 
-    // Reset form
-    setNewDocFile(null);
-    setNewDocNome('');
-    setNewDocDescricao('');
-    setIsAddDocOpen(false);
+      // Reset form
+      setNewDocFile(null);
+      setNewDocNome('');
+      setNewDocDescricao('');
+      setIsAddDocOpen(false);
+    } catch (err: any) {
+      setActionError(err?.message || 'Erro ao salvar anexo no banco de dados MariaDB.');
+    }
   };
 
   const handleRemoveDoc = async (documentoId: string, nomeDoc: string) => {
     if (!selectedPatient) return;
     if (window.confirm(`Deseja realmente remover o anexo "${nomeDoc}" do prontuário?`)) {
-      await removerDocumentoPaciente(selectedPatient.id, documentoId);
-      setActiveDetailPatient(prev => prev ? { ...prev, documentos: (prev.documentos || []).filter(d => d.id !== documentoId) } : null);
+      setActionError(null);
+      try {
+        await removerDocumentoPaciente(selectedPatient.id, documentoId);
+        setActiveDetailPatient(prev => prev ? { ...prev, documentos: (prev.documentos || []).filter(d => d.id !== documentoId) } : null);
+      } catch (err: any) {
+        setActionError(err?.message || 'Erro ao remover anexo no banco de dados MariaDB.');
+      }
     }
   };
 
@@ -460,6 +494,32 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
           </button>
         )}
       </div>
+
+      {(actionError || (syncState === 'offline' && dbError)) && (
+        <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">
+                {actionError || 'Banco de dados MariaDB desconectado (Offline)'}
+              </p>
+              {!actionError && dbError && (
+                <p className="text-[11px] opacity-90 mt-0.5">{dbError}</p>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setActionError(null);
+              recarregarDaNuvem();
+            }}
+            className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold self-start sm:self-center cursor-pointer"
+          >
+            Reconectar ao Banco
+          </button>
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="flex flex-col md:flex-row gap-3 bg-white dark:bg-stone-900 p-3.5 rounded-2xl border border-stone-200 dark:border-stone-800 shadow-xs">
@@ -1464,6 +1524,16 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
             </div>
 
             <form onSubmit={handleSavePatient} className="p-6 overflow-y-auto space-y-4 flex-1">
+              {formError && (
+                <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-500" />
+                  <div>
+                    <p className="font-bold">Erro ao salvar no banco de dados</p>
+                    <p className="mt-0.5">{formError}</p>
+                  </div>
+                </div>
+              )}
+
               {/* Category Selector */}
               <div>
                 <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1.5">
@@ -1861,16 +1931,22 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
               <div className="pt-4 border-t border-stone-200 dark:border-stone-800 flex justify-end gap-2">
                 <button
                   type="button"
+                  disabled={isSavingPatient}
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-200 cursor-pointer"
+                  className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-800 text-stone-700 dark:text-stone-300 text-xs font-semibold hover:bg-stone-200 cursor-pointer disabled:opacity-50"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs cursor-pointer"
+                  disabled={isSavingPatient}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-xs cursor-pointer disabled:opacity-60"
                 >
-                  {editingPatient ? 'Salvar Alterações' : 'Concluir Cadastro'}
+                  {isSavingPatient
+                    ? 'Salvando no banco...'
+                    : editingPatient
+                    ? 'Salvar Alterações'
+                    : 'Concluir Cadastro'}
                 </button>
               </div>
             </form>

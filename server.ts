@@ -284,21 +284,83 @@ const TABLE_DDL_STATEMENTS: string[] = [
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
 ];
 
+let schemaVerified = false;
+let schemaEnsurePromise: Promise<void> | null = null;
+
+async function ensureMissingColumns(): Promise<void> {
+  const requiredColumns: Array<{ table: string; column: string; definition: string }> = [
+    { table: 'clinic_data', column: 'version', definition: 'INT NOT NULL DEFAULT 1' },
+    { table: 'pacientes', column: 'sync_code', definition: "VARCHAR(100) NOT NULL DEFAULT 'ninho-principal'" },
+    { table: 'pacientes', column: 'categoria', definition: 'VARCHAR(100) NULL' },
+    { table: 'pacientes', column: 'escola', definition: 'VARCHAR(255) NULL' },
+    { table: 'pacientes', column: 'serie', definition: 'VARCHAR(100) NULL' },
+    { table: 'pacientes', column: 'fone', definition: 'VARCHAR(50) NULL' },
+    { table: 'pacientes', column: 'email', definition: 'VARCHAR(255) NULL' },
+    { table: 'pacientes', column: 'alergias', definition: 'TEXT NULL' },
+    { table: 'pacientes', column: 'medicacao', definition: 'TEXT NULL' },
+    { table: 'pacientes', column: 'data_inicio', definition: 'VARCHAR(20) NULL' },
+    { table: 'pacientes', column: 'status', definition: "VARCHAR(50) NOT NULL DEFAULT 'Ativo'" },
+    { table: 'pacientes', column: 'tags', definition: 'JSON NULL' },
+    { table: 'pacientes', column: 'notas_gerais', definition: 'LONGTEXT NULL' },
+    { table: 'pacientes', column: 'dados_perinatais', definition: 'JSON NULL' },
+    { table: 'paciente_documentos', column: 'sync_code', definition: "VARCHAR(100) NOT NULL DEFAULT 'ninho-principal'" },
+    { table: 'paciente_documentos', column: 'tipo', definition: 'VARCHAR(150) NULL' },
+    { table: 'paciente_documentos', column: 'categoria', definition: 'VARCHAR(150) NULL' },
+    { table: 'paciente_documentos', column: 'tamanho', definition: 'BIGINT NULL' },
+    { table: 'paciente_documentos', column: 'data_upload', definition: "VARCHAR(50) NOT NULL DEFAULT ''" },
+    { table: 'paciente_documentos', column: 'url', definition: 'LONGTEXT NULL' },
+    { table: 'paciente_documentos', column: 'descricao', definition: 'TEXT NULL' },
+    { table: 'paciente_documentos', column: 'enviado_por', definition: 'VARCHAR(150) NULL' }
+  ];
+
+  const [cols] = await db.query<RowDataPacket[]>(
+    `SELECT TABLE_NAME, COLUMN_NAME
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME IN ('clinic_data', 'pacientes', 'paciente_documentos')`
+  );
+
+  const existingSet = new Set(
+    (cols || []).map(r => `${String(r.TABLE_NAME).toLowerCase()}.${String(r.COLUMN_NAME).toLowerCase()}`)
+  );
+
+  for (const col of requiredColumns) {
+    const key = `${col.table}.${col.column}`.toLowerCase();
+    if (!existingSet.has(key)) {
+      await db.query(`ALTER TABLE ${col.table} ADD COLUMN ${col.column} ${col.definition}`);
+      existingSet.add(key);
+    }
+  }
+}
+
 async function ensureDatabaseTables(): Promise<void> {
   try {
     for (const ddl of TABLE_DDL_STATEMENTS) {
       await db.query(ddl);
     }
+    await ensureMissingColumns();
+    schemaVerified = true;
   } catch (erro: any) {
+    schemaVerified = false;
     console.error('Erro ao verificar/criar tabelas no MariaDB:', erro?.code || erro?.message || 'Erro desconhecido');
     throw erro;
   }
 }
 
+async function ensureSchemaOnce(): Promise<void> {
+  if (schemaVerified) return;
+  if (!schemaEnsurePromise) {
+    schemaEnsurePromise = ensureDatabaseTables().finally(() => {
+      schemaEnsurePromise = null;
+    });
+  }
+  await schemaEnsurePromise;
+}
+
 async function verificarBanco(): Promise<void> {
   try {
     await db.query('SELECT 1');
-    await ensureDatabaseTables();
+    await ensureSchemaOnce();
     console.log('Conexão com o MariaDB estabelecida e tabelas verificadas');
   } catch (erro: any) {
     console.error('Erro ao conectar ao MariaDB:', erro?.code || erro?.message || 'Erro desconhecido');
@@ -308,6 +370,13 @@ async function verificarBanco(): Promise<void> {
 
 function safeParseJson<T>(value: any, fallback: T): T {
   if (value === null || value === undefined || value === '') return fallback;
+  if (Buffer.isBuffer(value)) {
+    try {
+      return JSON.parse(value.toString('utf8')) as T;
+    } catch {
+      return fallback;
+    }
+  }
   if (typeof value === 'string') {
     try {
       return JSON.parse(value) as T;
@@ -538,6 +607,8 @@ async function databaseHasAnyRecords(): Promise<boolean> {
 
 async function loadClinicData(syncCode: string): Promise<ClinicData | null> {
   try {
+    await ensureSchemaOnce();
+
     const [rows] = await db.query<RowDataPacket[]>(
       'SELECT data, version, updated_at FROM clinic_data WHERE sync_code = ? LIMIT 1',
       [syncCode]
@@ -581,10 +652,9 @@ async function loadClinicData(syncCode: string): Promise<ClinicData | null> {
     }
 
     const row = rows[0];
-    const parsed: ClinicData =
-      typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    const parsed: ClinicData = safeParseJson<ClinicData>(row.data, createEmptyClinicData());
 
-    let pacientesFinais = parsed?.pacientes || [];
+    let pacientesFinais = Array.isArray(parsed?.pacientes) ? parsed.pacientes : [];
     if (pacienteRows && pacienteRows.length > 0) {
       pacientesFinais = mapRowsToPacientes(pacienteRows, docRows || []);
     } else if (Array.isArray(parsed?.pacientes) && parsed.pacientes.length > 0) {
@@ -622,8 +692,54 @@ async function loadClinicData(syncCode: string): Promise<ClinicData | null> {
   }
 }
 
+async function syncClinicDataJsonPatientsFromDb(syncCode: string): Promise<void> {
+  try {
+    const [pacienteRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE sync_code = ? ORDER BY created_at DESC',
+      [syncCode]
+    );
+    const [docRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM paciente_documentos WHERE sync_code = ? ORDER BY created_at ASC',
+      [syncCode]
+    );
+    const pacientesAtualizados = mapRowsToPacientes(pacienteRows || [], docRows || []);
+
+    const [clinicRows] = await db.query<RowDataPacket[]>(
+      'SELECT data, version FROM clinic_data WHERE sync_code = ? LIMIT 1',
+      [syncCode]
+    );
+
+    const existing =
+      clinicRows && clinicRows.length > 0
+        ? safeParseJson<ClinicData>(clinicRows[0].data, createEmptyClinicData())
+        : createEmptyClinicData();
+
+    const newVersion = (Number(clinicRows?.[0]?.version ?? existing.version) || 0) + 1;
+    const updated: ClinicData = {
+      ...existing,
+      pacientes: pacientesAtualizados,
+      version: newVersion,
+      lastUpdated: new Date().toISOString()
+    };
+
+    await db.execute(
+      `INSERT INTO clinic_data (sync_code, data, version)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         data = VALUES(data),
+         version = VALUES(version)`,
+      [syncCode, JSON.stringify(updated), newVersion]
+    );
+  } catch (erro: any) {
+    console.error('Erro ao atualizar clinic_data a partir de pacientes:', erro?.code || erro?.message);
+    throw erro;
+  }
+}
+
 async function saveClinicData(syncCode: string, data: ClinicData): Promise<void> {
   try {
+    await ensureSchemaOnce();
+
     const version = Number(data.version) || 1;
     const payloadToSave: ClinicData = {
       ...data,
@@ -929,11 +1045,14 @@ app.get('/api/health', (req, res) => {
 
 // Database connection test endpoint (never exposes credentials)
 app.get('/api/health/db', async (req, res) => {
+  const envConfigured = Boolean(process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME);
   try {
     await db.query('SELECT 1');
+    await ensureSchemaOnce();
     res.status(200).json({
       ok: true,
       status: 'connected',
+      envConfigured,
       time: new Date().toISOString()
     });
   } catch (erro: any) {
@@ -941,7 +1060,11 @@ app.get('/api/health/db', async (req, res) => {
     res.status(500).json({
       ok: false,
       status: 'error',
-      erro: 'Não foi possível conectar ao banco de dados'
+      envConfigured,
+      code: erro?.code || 'DB_ERROR',
+      erro: envConfigured
+        ? 'Não foi possível conectar ao banco de dados MariaDB'
+        : 'Variáveis de ambiente do banco (DB_HOST, DB_USER, DB_NAME) não configuradas no servidor'
     });
   }
 });
@@ -950,6 +1073,7 @@ app.get('/api/health/db', async (req, res) => {
 app.get('/api/sync/:syncCode?', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
+    await ensureSchemaOnce();
     const syncCode = (req.params.syncCode || DEFAULT_SYNC_CODE).trim() || DEFAULT_SYNC_CODE;
     let data = await loadClinicData(syncCode);
     if (!data) {
@@ -969,6 +1093,7 @@ app.get('/api/sync/:syncCode?', async (req, res) => {
     console.error('Erro ao carregar dados da clínica (GET /api/sync):', erro?.code || erro?.message);
     res.status(500).json({
       success: false,
+      code: erro?.code || 'DB_ERROR',
       erro: 'Não foi possível carregar os dados no banco de dados'
     });
   }
@@ -978,17 +1103,30 @@ app.get('/api/sync/:syncCode?', async (req, res) => {
 app.post('/api/sync/:syncCode?', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
+    await ensureSchemaOnce();
     const syncCode = (req.params.syncCode || DEFAULT_SYNC_CODE).trim() || DEFAULT_SYNC_CODE;
     const incomingData = req.body;
 
     if (!incomingData || typeof incomingData !== 'object') {
-      return res.status(400).json({ success: false, error: 'Payload inválido para sincronização' });
+      return res.status(400).json({ success: false, erro: 'Payload inválido para sincronização' });
     }
 
-    const existing = (await loadClinicData(syncCode)) || createEmptyClinicData();
-    const newVersion = (Number(existing.version) || 0) + 1;
+    const existing = await loadClinicData(syncCode);
+    const clientInitialized = req.headers['x-sync-initialized'] !== 'false';
+    const incomingPatientsCount = Array.isArray(incomingData.pacientes) ? incomingData.pacientes.length : 0;
+    const existingPatientsCount = Array.isArray(existing?.pacientes) ? existing.pacientes.length : 0;
+
+    if (!clientInitialized && existing && existingPatientsCount > 0 && incomingPatientsCount === 0) {
+      return res.status(409).json({
+        success: false,
+        erro: 'Sincronização bloqueada para proteger dados existentes: cliente ainda não carregou os dados do banco.'
+      });
+    }
+
+    const baseExisting = existing || createEmptyClinicData();
+    const newVersion = (Number(baseExisting.version) || 0) + 1;
     const updatedData: ClinicData = {
-      ...existing,
+      ...baseExisting,
       ...incomingData,
       version: newVersion,
       lastUpdated: new Date().toISOString()
@@ -1006,6 +1144,7 @@ app.post('/api/sync/:syncCode?', async (req, res) => {
     console.error('Erro ao salvar dados da clínica (POST /api/sync):', erro?.code || erro?.message);
     res.status(500).json({
       success: false,
+      code: erro?.code || 'DB_ERROR',
       erro: 'Não foi possível salvar os dados no banco de dados'
     });
   }
@@ -1036,6 +1175,7 @@ app.post('/api/reset-demo/:syncCode?', async (req, res) => {
 app.get('/api/pacientes', async (req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
+    await ensureSchemaOnce();
     const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
     const [pacienteRows] = await db.query<RowDataPacket[]>(
       'SELECT * FROM pacientes WHERE sync_code = ? ORDER BY created_at DESC',
@@ -1067,22 +1207,19 @@ app.get('/api/pacientes', async (req, res) => {
 });
 
 app.post('/api/pacientes', async (req, res) => {
-  const conn = await db.getConnection().catch(() => null);
+  let conn: any = null;
   try {
+    await ensureSchemaOnce();
+    conn = await db.getConnection();
     const body = req.body || {};
     const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
     const pacienteId = String(body.id || `pac_${Date.now()}`);
 
     if (!body.nome || !body.nasc || !body.resp) {
-      if (conn) conn.release();
       return res.status(400).json({
         sucesso: false,
         erro: 'Nome, data de nascimento e responsável são obrigatórios'
       });
-    }
-
-    if (!conn) {
-      throw new Error('Não foi possível obter conexão com o banco de dados');
     }
 
     const pacientePayload = { ...body, id: pacienteId };
@@ -1117,6 +1254,8 @@ app.post('/api/pacientes', async (req, res) => {
       [pacienteId, syncCode]
     );
 
+    await syncClinicDataJsonPatientsFromDb(syncCode);
+
     const [pacienteConfirmado] = mapRowsToPacientes(confirmPacienteRows, confirmDocRows || []);
 
     console.log('[TEMP-LOG][PACIENTE_SAVE]', {
@@ -1137,6 +1276,7 @@ app.post('/api/pacientes', async (req, res) => {
     console.error('Erro ao salvar paciente no MariaDB:', erro?.code || erro?.message);
     res.status(500).json({
       sucesso: false,
+      code: erro?.code || 'DB_ERROR',
       erro: 'Não foi possível salvar o paciente no banco de dados'
     });
   } finally {
@@ -1145,15 +1285,13 @@ app.post('/api/pacientes', async (req, res) => {
 });
 
 app.put('/api/pacientes/:id', async (req, res) => {
-  const conn = await db.getConnection().catch(() => null);
+  let conn: any = null;
   try {
+    await ensureSchemaOnce();
+    conn = await db.getConnection();
     const pacienteId = String(req.params.id);
     const body = req.body || {};
     const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
-
-    if (!conn) {
-      throw new Error('Não foi possível obter conexão com o banco de dados');
-    }
 
     const [existingRows] = await db.query<RowDataPacket[]>(
       'SELECT * FROM pacientes WHERE id = ? AND sync_code = ? LIMIT 1',
@@ -1166,6 +1304,28 @@ app.put('/api/pacientes/:id', async (req, res) => {
     const merged = { ...existingMapped, ...body, id: pacienteId };
     await conn.beginTransaction();
     await upsertPacienteInConn(conn, syncCode, merged);
+
+    if (Array.isArray(body.documentos)) {
+      const docIds: string[] = [];
+      for (const doc of body.documentos) {
+        if (!doc || !doc.id) continue;
+        docIds.push(String(doc.id));
+        await upsertDocumentoInConn(conn, syncCode, pacienteId, doc);
+      }
+      if (docIds.length > 0) {
+        const placeholders = docIds.map(() => '?').join(',');
+        await conn.execute(
+          `DELETE FROM paciente_documentos WHERE sync_code = ? AND paciente_id = ? AND id NOT IN (${placeholders})`,
+          [syncCode, pacienteId, ...docIds]
+        );
+      } else {
+        await conn.execute(
+          'DELETE FROM paciente_documentos WHERE sync_code = ? AND paciente_id = ?',
+          [syncCode, pacienteId]
+        );
+      }
+    }
+
     await conn.commit();
 
     const [confirmRows] = await db.query<RowDataPacket[]>(
@@ -1179,6 +1339,8 @@ app.put('/api/pacientes/:id', async (req, res) => {
       });
     }
 
+    await syncClinicDataJsonPatientsFromDb(syncCode);
+
     res.json({
       sucesso: true,
       confirmadoNoBanco: true,
@@ -1189,6 +1351,7 @@ app.put('/api/pacientes/:id', async (req, res) => {
     console.error('Erro ao atualizar paciente no MariaDB:', erro?.code || erro?.message);
     res.status(500).json({
       sucesso: false,
+      code: erro?.code || 'DB_ERROR',
       erro: 'Não foi possível atualizar o paciente no banco de dados'
     });
   } finally {
@@ -1198,6 +1361,7 @@ app.put('/api/pacientes/:id', async (req, res) => {
 
 app.delete('/api/pacientes/:id', async (req, res) => {
   try {
+    await ensureSchemaOnce();
     const pacienteId = String(req.params.id);
     const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
 
@@ -1209,6 +1373,8 @@ app.delete('/api/pacientes/:id', async (req, res) => {
       'DELETE FROM pacientes WHERE id = ? AND sync_code = ?',
       [pacienteId, syncCode]
     );
+
+    await syncClinicDataJsonPatientsFromDb(syncCode);
 
     res.json({ sucesso: true, id: pacienteId });
   } catch (erro: any) {
@@ -1222,6 +1388,7 @@ app.delete('/api/pacientes/:id', async (req, res) => {
 
 app.post('/api/pacientes/:pacienteId/documentos', async (req, res) => {
   try {
+    await ensureSchemaOnce();
     const pacienteId = String(req.params.pacienteId);
     const body = req.body || {};
     const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
@@ -1283,6 +1450,8 @@ app.post('/api/pacientes/:pacienteId/documentos', async (req, res) => {
       });
     }
 
+    await syncClinicDataJsonPatientsFromDb(syncCode);
+
     res.status(201).json({
       sucesso: true,
       confirmadoNoBanco: true,
@@ -1300,6 +1469,7 @@ app.post('/api/pacientes/:pacienteId/documentos', async (req, res) => {
 
 app.delete('/api/pacientes/:pacienteId/documentos/:docId', async (req, res) => {
   try {
+    await ensureSchemaOnce();
     const pacienteId = String(req.params.pacienteId);
     const docId = String(req.params.docId);
     const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
@@ -1308,6 +1478,8 @@ app.delete('/api/pacientes/:pacienteId/documentos/:docId', async (req, res) => {
       'DELETE FROM paciente_documentos WHERE id = ? AND paciente_id = ? AND sync_code = ?',
       [docId, pacienteId, syncCode]
     );
+
+    await syncClinicDataJsonPatientsFromDb(syncCode);
 
     res.json({ sucesso: true, id: docId });
   } catch (erro: any) {
@@ -1385,6 +1557,14 @@ app.get('/api/clientes', async (req, res) => {
       erro: 'Não foi possível buscar clientes'
     });
   }
+});
+
+// Qualquer rota /api desconhecida deve retornar JSON (nunca index.html)
+app.use('/api', (_req, res) => {
+  res.status(404).json({
+    sucesso: false,
+    erro: 'Rota da API não encontrada'
+  });
 });
 
 // Start server with Vite or static handler
