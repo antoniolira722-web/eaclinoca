@@ -7,26 +7,21 @@ import {
   Shield,
   HeartHandshake,
   ArrowRight,
-  Sparkles,
-  CheckCircle2,
   AlertCircle,
-  KeyRound,
   Sun,
-  Moon,
-  Users
+  Moon
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useClinic } from '../context/ClinicContext';
 import { useTheme } from '../context/ThemeContext';
-import { INFO_NIVEIS_ACESSO } from '../utils/authUtils';
 
 export const LoginScreen: React.FC = () => {
-  const { login, quickSwitchUser, usuarios } = useAuth();
+  const { login } = useAuth();
   const { state } = useClinic();
-  const { theme, resolvedTheme, toggleTheme } = useTheme();
+  const { resolvedTheme, toggleTheme } = useTheme();
 
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -49,30 +44,7 @@ export const LoginScreen: React.FC = () => {
     }
   };
 
-  const handleQuickLogin = async (userLogin: string, defaultPass: string) => {
-    setUsername(userLogin);
-    setPassword(defaultPass);
-    setErrorMsg(null);
-    setIsLoading(true);
-
-    try {
-      const result = await login(userLogin, defaultPass, true);
-      if (!result.success) {
-        // Tenta switch direto caso senha tenha sido alterada
-        const switched = await quickSwitchUser(userLogin);
-        if (!switched) {
-          setErrorMsg(result.message || 'Credenciais inválidas.');
-        }
-      }
-    } catch (e: any) {
-      setErrorMsg(e.message || 'Erro ao realizar login rápido.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const clinicaNome = state.configuracoes?.nomeClinica || 'Ninho';
-  const clinicaProfissional = state.configuracoes?.profissional || 'Ester Lopes';
 
   return (
     <div className="min-h-screen bg-stone-100 dark:bg-stone-950 flex flex-col justify-between p-4 sm:p-6 lg:p-8 transition-colors duration-200">
@@ -199,46 +171,6 @@ export const LoginScreen: React.FC = () => {
                 </>
               )}
             </button>
-
-            {/* Quick Demo Access Chips */}
-            <div className="pt-4 border-t border-stone-100 dark:border-stone-800/80">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-bold text-stone-500 dark:text-stone-400 uppercase tracking-wider">
-                  Perfis de Acesso Rápidos:
-                </span>
-                <span className="text-[10px] text-stone-400">Clique para testar</span>
-              </div>
-
-              <div className="space-y-1.5">
-                {usuarios.map((u) => {
-                  const nivelInfo = INFO_NIVEIS_ACESSO[u.nivelAcesso] || INFO_NIVEIS_ACESSO.estagiario;
-                  return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      onClick={() => handleQuickLogin(u.username, u.senha)}
-                      className="w-full p-2 rounded-xl bg-stone-50 hover:bg-emerald-50 dark:bg-stone-800/50 dark:hover:bg-emerald-950/30 border border-stone-200/80 hover:border-emerald-300 dark:border-stone-700/60 dark:hover:border-emerald-800 flex items-center justify-between transition-all text-left cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-base">{nivelInfo.icone}</span>
-                        <div>
-                          <p className="text-xs font-bold text-stone-800 dark:text-stone-200 group-hover:text-emerald-700 dark:group-hover:text-emerald-300">
-                            {u.nome}
-                          </p>
-                          <p className="text-[10px] text-stone-500 dark:text-stone-400">
-                            login: <code className="font-mono font-bold text-stone-700 dark:text-stone-300">{u.username}</code> • senha: <code className="font-mono">{u.senha}</code>
-                          </p>
-                        </div>
-                      </div>
-
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${nivelInfo.badgeBg} ${nivelInfo.badgeText} ${nivelInfo.badgeBorder}`}>
-                        {nivelInfo.nome.split('/')[0].trim()}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
           </form>
         </div>
       </div>

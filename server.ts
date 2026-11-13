@@ -21,11 +21,11 @@ app.use(express.json({ limit: '25mb' }));
 
 // MariaDB / MySQL Connection Pool (via environment variables only)
 const db = mysql.createPool({
-  host: process.env.DB_HOST,
+  host: process.env.DB_HOST?.trim(),
   port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER,
+  user: process.env.DB_USER?.trim(),
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
+  database: process.env.DB_NAME?.trim(),
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0
@@ -1045,7 +1045,12 @@ app.get('/api/health', (req, res) => {
 
 // Database connection test endpoint (never exposes credentials)
 app.get('/api/health/db', async (req, res) => {
-  const envConfigured = Boolean(process.env.DB_HOST && process.env.DB_USER && process.env.DB_NAME);
+  const envConfigured = Boolean(
+    process.env.DB_HOST?.trim() &&
+    process.env.DB_USER?.trim() &&
+    process.env.DB_NAME?.trim()
+  );
+  const passwordConfigured = Boolean(process.env.DB_PASSWORD);
   try {
     await db.query('SELECT 1');
     await ensureSchemaOnce();
@@ -1053,6 +1058,7 @@ app.get('/api/health/db', async (req, res) => {
       ok: true,
       status: 'connected',
       envConfigured,
+      passwordConfigured,
       time: new Date().toISOString()
     });
   } catch (erro: any) {
@@ -1061,10 +1067,13 @@ app.get('/api/health/db', async (req, res) => {
       ok: false,
       status: 'error',
       envConfigured,
+      passwordConfigured,
       code: erro?.code || 'DB_ERROR',
-      erro: envConfigured
-        ? 'Não foi possível conectar ao banco de dados MariaDB'
-        : 'Variáveis de ambiente do banco (DB_HOST, DB_USER, DB_NAME) não configuradas no servidor'
+      erro: !envConfigured
+        ? 'Variáveis de ambiente do banco (DB_HOST, DB_USER, DB_NAME) não configuradas no servidor'
+        : !passwordConfigured
+        ? 'Variável DB_PASSWORD não configurada no servidor'
+        : 'Não foi possível conectar ao banco de dados MariaDB'
     });
   }
 });
