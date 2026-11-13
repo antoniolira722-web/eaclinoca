@@ -285,8 +285,13 @@ const TABLE_DDL_STATEMENTS: string[] = [
 ];
 
 async function ensureDatabaseTables(): Promise<void> {
-  for (const ddl of TABLE_DDL_STATEMENTS) {
-    await db.query(ddl);
+  try {
+    for (const ddl of TABLE_DDL_STATEMENTS) {
+      await db.query(ddl);
+    }
+  } catch (erro: any) {
+    console.error('Erro ao verificar/criar tabelas no MariaDB:', erro?.code || erro?.message || 'Erro desconhecido');
+    throw erro;
   }
 }
 
@@ -301,43 +306,375 @@ async function verificarBanco(): Promise<void> {
   }
 }
 
-async function loadClinicData(syncCode: string): Promise<ClinicData | null> {
-  const [rows] = await db.query<RowDataPacket[]>(
-    'SELECT data, version, updated_at FROM clinic_data WHERE sync_code = ? LIMIT 1',
-    [syncCode]
-  );
-
-  if (!rows || rows.length === 0) {
-    return null;
+function safeParseJson<T>(value: any, fallback: T): T {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
   }
+  return value as T;
+}
 
-  const row = rows[0];
-  const parsed: ClinicData =
-    typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
-
+function mapRowToDocumento(row: RowDataPacket): any {
   return {
-    ...parsed,
-    version: row.version ?? parsed?.version ?? 1,
-    lastUpdated: parsed?.lastUpdated || (row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString())
+    id: row.id,
+    nome: row.nome,
+    tipo: row.tipo || undefined,
+    categoria: row.categoria || undefined,
+    tamanho: row.tamanho !== null && row.tamanho !== undefined ? Number(row.tamanho) : undefined,
+    dataUpload: row.data_upload,
+    url: row.url || undefined,
+    descricao: row.descricao || undefined,
+    enviadoPor: row.enviado_por || undefined
   };
 }
 
-async function saveClinicData(syncCode: string, data: ClinicData): Promise<void> {
-  const version = Number(data.version) || 1;
-  const payloadToSave: ClinicData = {
-    ...data,
-    version,
-    lastUpdated: data.lastUpdated || new Date().toISOString()
-  };
+function mapRowsToPacientes(pacienteRows: RowDataPacket[], docRows: RowDataPacket[]): any[] {
+  const docsByPaciente = new Map<string, any[]>();
+  for (const d of docRows) {
+    const list = docsByPaciente.get(d.paciente_id) || [];
+    list.push(mapRowToDocumento(d));
+    docsByPaciente.set(d.paciente_id, list);
+  }
 
-  await db.execute(
-    `INSERT INTO clinic_data (sync_code, data, version)
-     VALUES (?, ?, ?)
-     ON DUPLICATE KEY UPDATE
-       data = VALUES(data),
-       version = VALUES(version)`,
-    [syncCode, JSON.stringify(payloadToSave), version]
+  return pacienteRows.map(row => ({
+    id: row.id,
+    nome: row.nome,
+    nasc: row.nasc,
+    categoria: row.categoria || undefined,
+    escola: row.escola || '',
+    serie: row.serie || '',
+    resp: row.resp,
+    fone: row.fone || '',
+    email: row.email || '',
+    queixa: row.queixa,
+    alergias: row.alergias || '',
+    medicacao: row.medicacao || '',
+    dataInicio: row.data_inicio || undefined,
+    status: row.status || 'Ativo',
+    tags: safeParseJson<string[]>(row.tags, []),
+    notasGerais: row.notas_gerais || '',
+    dadosPerinatais: safeParseJson<any>(row.dados_perinatais, undefined),
+    documentos: docsByPaciente.get(row.id) || []
+  }));
+}
+
+async function upsertPacienteInConn(conn: any, syncCode: string, p: any): Promise<void> {
+  await conn.execute(
+    `INSERT INTO pacientes (
+      id, sync_code, nome, nasc, categoria, escola, serie, resp, fone, email,
+      queixa, alergias, medicacao, data_inicio, status, tags, notas_gerais, dados_perinatais
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      sync_code = VALUES(sync_code),
+      nome = VALUES(nome),
+      nasc = VALUES(nasc),
+      categoria = VALUES(categoria),
+      escola = VALUES(escola),
+      serie = VALUES(serie),
+      resp = VALUES(resp),
+      fone = VALUES(fone),
+      email = VALUES(email),
+      queixa = VALUES(queixa),
+      alergias = VALUES(alergias),
+      medicacao = VALUES(medicacao),
+      data_inicio = VALUES(data_inicio),
+      status = VALUES(status),
+      tags = VALUES(tags),
+      notas_gerais = VALUES(notas_gerais),
+      dados_perinatais = VALUES(dados_perinatais)`,
+    [
+      String(p.id),
+      syncCode,
+      String(p.nome || ''),
+      String(p.nasc || ''),
+      p.categoria || null,
+      p.escola || null,
+      p.serie || null,
+      String(p.resp || ''),
+      p.fone || null,
+      p.email || null,
+      String(p.queixa || ''),
+      p.alergias || null,
+      p.medicacao || null,
+      p.dataInicio || null,
+      String(p.status || 'Ativo'),
+      p.tags ? JSON.stringify(p.tags) : JSON.stringify([]),
+      p.notasGerais || null,
+      p.dadosPerinatais ? JSON.stringify(p.dadosPerinatais) : null
+    ]
   );
+}
+
+async function upsertDocumentoInConn(conn: any, syncCode: string, pacienteId: string, doc: any): Promise<void> {
+  await conn.execute(
+    `INSERT INTO paciente_documentos (
+      id, sync_code, paciente_id, nome, tipo, categoria, tamanho, data_upload, url, descricao, enviado_por
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      sync_code = VALUES(sync_code),
+      paciente_id = VALUES(paciente_id),
+      nome = VALUES(nome),
+      tipo = VALUES(tipo),
+      categoria = VALUES(categoria),
+      tamanho = VALUES(tamanho),
+      data_upload = VALUES(data_upload),
+      url = VALUES(url),
+      descricao = VALUES(descricao),
+      enviado_por = VALUES(enviado_por)`,
+    [
+      String(doc.id),
+      syncCode,
+      String(pacienteId),
+      String(doc.nome || 'documento'),
+      doc.tipo || null,
+      doc.categoria || null,
+      doc.tamanho !== undefined && doc.tamanho !== null ? Number(doc.tamanho) : null,
+      String(doc.dataUpload || new Date().toISOString()),
+      doc.url || null,
+      doc.descricao || null,
+      doc.enviadoPor || null
+    ]
+  );
+}
+
+async function syncPacientesAndDocumentos(syncCode: string, pacientes: any[]): Promise<void> {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const listaPacientes = Array.isArray(pacientes) ? pacientes : [];
+    const pacienteIds: string[] = [];
+    const docIds: string[] = [];
+
+    for (const p of listaPacientes) {
+      if (!p || !p.id) continue;
+      pacienteIds.push(String(p.id));
+      await upsertPacienteInConn(conn, syncCode, p);
+
+      const docs = Array.isArray(p.documentos) ? p.documentos : [];
+      for (const doc of docs) {
+        if (!doc || !doc.id) continue;
+        docIds.push(String(doc.id));
+        await upsertDocumentoInConn(conn, syncCode, String(p.id), doc);
+      }
+    }
+
+    if (docIds.length > 0) {
+      const placeholders = docIds.map(() => '?').join(',');
+      await conn.execute(
+        `DELETE FROM paciente_documentos WHERE sync_code = ? AND id NOT IN (${placeholders})`,
+        [syncCode, ...docIds]
+      );
+    } else {
+      await conn.execute('DELETE FROM paciente_documentos WHERE sync_code = ?', [syncCode]);
+    }
+
+    if (pacienteIds.length > 0) {
+      const placeholders = pacienteIds.map(() => '?').join(',');
+      await conn.execute(
+        `DELETE FROM pacientes WHERE sync_code = ? AND id NOT IN (${placeholders})`,
+        [syncCode, ...pacienteIds]
+      );
+    } else {
+      await conn.execute('DELETE FROM pacientes WHERE sync_code = ?', [syncCode]);
+    }
+
+    await conn.commit();
+  } catch (erro: any) {
+    await conn.rollback().catch(() => {});
+    console.error('Erro ao sincronizar pacientes/documentos no MariaDB:', erro?.code || erro?.message);
+    throw erro;
+  } finally {
+    conn.release();
+  }
+}
+
+function createEmptyClinicData(): ClinicData {
+  return {
+    pacientes: [],
+    agenda: [],
+    sessoes: [],
+    planos: [],
+    financeiro: [],
+    lembretes: [],
+    notificacoes: [],
+    relatorios: [],
+    configuracoes: {
+      nomeClinica: 'Ninho',
+      profissional: 'Ester Lopes',
+      registroProfissional: 'ABPp 4821/SP',
+      contato: '(11) 98765-0000 · contato@ninho.com.br',
+      endereco: 'Av. Paulista, 1000 - Cj 84 - Bela Vista, São Paulo - SP',
+      tema: 'system',
+      notificacoesAtivas: true,
+      lembretesSonoros: false,
+      syncAuto: true,
+      syncIntervalSec: 15
+    },
+    lastUpdated: new Date().toISOString(),
+    version: 1
+  };
+}
+
+async function databaseHasAnyRecords(): Promise<boolean> {
+  try {
+    const [clinicRows] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS total FROM clinic_data');
+    const [pacRows] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS total FROM pacientes');
+    const [cliRows] = await db.query<RowDataPacket[]>('SELECT COUNT(*) AS total FROM clientes');
+    const total =
+      Number(clinicRows?.[0]?.total || 0) +
+      Number(pacRows?.[0]?.total || 0) +
+      Number(cliRows?.[0]?.total || 0);
+    return total > 0;
+  } catch (erro: any) {
+    console.error('Erro ao verificar registros existentes no banco:', erro?.code || erro?.message);
+    return true;
+  }
+}
+
+async function loadClinicData(syncCode: string): Promise<ClinicData | null> {
+  try {
+    const [rows] = await db.query<RowDataPacket[]>(
+      'SELECT data, version, updated_at FROM clinic_data WHERE sync_code = ? LIMIT 1',
+      [syncCode]
+    );
+
+    const [pacienteRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE sync_code = ? ORDER BY created_at DESC',
+      [syncCode]
+    );
+
+    const [docRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM paciente_documentos WHERE sync_code = ? ORDER BY created_at ASC',
+      [syncCode]
+    );
+
+    if (!rows || rows.length === 0) {
+      if (pacienteRows && pacienteRows.length > 0) {
+        const pacientesHidratados = mapRowsToPacientes(pacienteRows, docRows || []);
+        const result: ClinicData = {
+          ...createEmptyClinicData(),
+          pacientes: pacientesHidratados,
+          lastUpdated: new Date().toISOString(),
+          version: 1
+        };
+        console.log('[TEMP-LOG][DB_LOAD]', {
+          syncCode,
+          clinica: result.configuracoes?.nomeClinica || 'Ninho',
+          registrosCarregados: {
+            pacientes: pacientesHidratados.length,
+            documentos: docRows?.length || 0
+          }
+        });
+        return result;
+      }
+      console.log('[TEMP-LOG][DB_LOAD]', {
+        syncCode,
+        clinica: 'Ninho',
+        registrosCarregados: { pacientes: 0, documentos: 0 }
+      });
+      return null;
+    }
+
+    const row = rows[0];
+    const parsed: ClinicData =
+      typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+
+    let pacientesFinais = parsed?.pacientes || [];
+    if (pacienteRows && pacienteRows.length > 0) {
+      pacientesFinais = mapRowsToPacientes(pacienteRows, docRows || []);
+    } else if (Array.isArray(parsed?.pacientes) && parsed.pacientes.length > 0) {
+      // Caso clinic_data tenha sido importado antes das tabelas relacionais, popula pacientes/documentos
+      await syncPacientesAndDocumentos(syncCode, parsed.pacientes);
+    }
+
+    const loaded: ClinicData = {
+      ...parsed,
+      pacientes: pacientesFinais,
+      version: row.version ?? parsed?.version ?? 1,
+      lastUpdated: parsed?.lastUpdated || (row.updated_at ? new Date(row.updated_at).toISOString() : new Date().toISOString())
+    };
+
+    console.log('[TEMP-LOG][DB_LOAD]', {
+      syncCode,
+      clinica: loaded.configuracoes?.nomeClinica || 'Ninho',
+      registrosCarregados: {
+        pacientes: loaded.pacientes?.length || 0,
+        documentos: docRows?.length || 0,
+        agenda: loaded.agenda?.length || 0,
+        sessoes: loaded.sessoes?.length || 0,
+        planos: loaded.planos?.length || 0,
+        financeiro: loaded.financeiro?.length || 0,
+        lembretes: loaded.lembretes?.length || 0,
+        relatorios: loaded.relatorios?.length || 0,
+        usuarios: loaded.usuarios?.length || 0
+      }
+    });
+
+    return loaded;
+  } catch (erro: any) {
+    console.error('Erro em loadClinicData:', erro?.code || erro?.message || 'Erro desconhecido');
+    throw erro;
+  }
+}
+
+async function saveClinicData(syncCode: string, data: ClinicData): Promise<void> {
+  try {
+    const version = Number(data.version) || 1;
+    const payloadToSave: ClinicData = {
+      ...data,
+      version,
+      lastUpdated: data.lastUpdated || new Date().toISOString()
+    };
+
+    await db.execute(
+      `INSERT INTO clinic_data (sync_code, data, version)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         data = VALUES(data),
+         version = VALUES(version)`,
+      [syncCode, JSON.stringify(payloadToSave), version]
+    );
+
+    await syncPacientesAndDocumentos(syncCode, payloadToSave.pacientes || []);
+
+    // Consulta de confirmação no banco após salvar
+    const [confirmRows] = await db.query<RowDataPacket[]>(
+      'SELECT sync_code, version FROM clinic_data WHERE sync_code = ? LIMIT 1',
+      [syncCode]
+    );
+    if (!confirmRows || confirmRows.length === 0) {
+      throw new Error('Falha ao confirmar gravação na tabela clinic_data');
+    }
+
+    const totalDocsSalvos = (payloadToSave.pacientes || []).reduce(
+      (acc: number, p: any) => acc + (Array.isArray(p?.documentos) ? p.documentos.length : 0),
+      0
+    );
+
+    console.log('[TEMP-LOG][DB_SAVE]', {
+      syncCode,
+      clinica: payloadToSave.configuracoes?.nomeClinica || 'Ninho',
+      registrosSalvos: {
+        pacientes: payloadToSave.pacientes?.length || 0,
+        documentos: totalDocsSalvos,
+        agenda: payloadToSave.agenda?.length || 0,
+        sessoes: payloadToSave.sessoes?.length || 0,
+        planos: payloadToSave.planos?.length || 0,
+        financeiro: payloadToSave.financeiro?.length || 0,
+        lembretes: payloadToSave.lembretes?.length || 0,
+        relatorios: payloadToSave.relatorios?.length || 0,
+        usuarios: payloadToSave.usuarios?.length || 0
+      }
+    });
+  } catch (erro: any) {
+    console.error('Erro em saveClinicData:', erro?.code || erro?.message || 'Erro desconhecido');
+    throw erro;
+  }
 }
 
 // Initial default seed data for demonstration if new
@@ -611,11 +948,15 @@ app.get('/api/health/db', async (req, res) => {
 
 // Get clinic data by syncCode (default or custom)
 app.get('/api/sync/:syncCode?', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     const syncCode = (req.params.syncCode || DEFAULT_SYNC_CODE).trim() || DEFAULT_SYNC_CODE;
     let data = await loadClinicData(syncCode);
     if (!data) {
-      data = { ...initialData, lastUpdated: new Date().toISOString(), version: 1 };
+      const jaTemRegistros = await databaseHasAnyRecords();
+      data = jaTemRegistros
+        ? createEmptyClinicData()
+        : { ...initialData, lastUpdated: new Date().toISOString(), version: 1 };
       await saveClinicData(syncCode, data);
     }
     res.json({
@@ -635,6 +976,7 @@ app.get('/api/sync/:syncCode?', async (req, res) => {
 
 // Push/sync clinic data
 app.post('/api/sync/:syncCode?', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   try {
     const syncCode = (req.params.syncCode || DEFAULT_SYNC_CODE).trim() || DEFAULT_SYNC_CODE;
     const incomingData = req.body;
@@ -643,7 +985,7 @@ app.post('/api/sync/:syncCode?', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Payload inválido para sincronização' });
     }
 
-    const existing = (await loadClinicData(syncCode)) || initialData;
+    const existing = (await loadClinicData(syncCode)) || createEmptyClinicData();
     const newVersion = (Number(existing.version) || 0) + 1;
     const updatedData: ClinicData = {
       ...existing,
@@ -690,6 +1032,293 @@ app.post('/api/reset-demo/:syncCode?', async (req, res) => {
   }
 });
 
+// Rotas relacionais dedicadas para pacientes e paciente_documentos (com confirmação por SELECT)
+app.get('/api/pacientes', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  try {
+    const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+    const [pacienteRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE sync_code = ? ORDER BY created_at DESC',
+      [syncCode]
+    );
+    const [docRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM paciente_documentos WHERE sync_code = ? ORDER BY created_at ASC',
+      [syncCode]
+    );
+    const pacientes = mapRowsToPacientes(pacienteRows || [], docRows || []);
+    console.log('[TEMP-LOG][PACIENTES_LOAD]', {
+      syncCode,
+      clinica: syncCode,
+      registrosCarregados: pacientes.length
+    });
+    res.json({
+      sucesso: true,
+      syncCode,
+      total: pacientes.length,
+      pacientes
+    });
+  } catch (erro: any) {
+    console.error('Erro ao listar pacientes no MariaDB:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível buscar pacientes no banco de dados'
+    });
+  }
+});
+
+app.post('/api/pacientes', async (req, res) => {
+  const conn = await db.getConnection().catch(() => null);
+  try {
+    const body = req.body || {};
+    const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+    const pacienteId = String(body.id || `pac_${Date.now()}`);
+
+    if (!body.nome || !body.nasc || !body.resp) {
+      if (conn) conn.release();
+      return res.status(400).json({
+        sucesso: false,
+        erro: 'Nome, data de nascimento e responsável são obrigatórios'
+      });
+    }
+
+    if (!conn) {
+      throw new Error('Não foi possível obter conexão com o banco de dados');
+    }
+
+    const pacientePayload = { ...body, id: pacienteId };
+    await conn.beginTransaction();
+    await upsertPacienteInConn(conn, syncCode, pacientePayload);
+
+    const docs = Array.isArray(body.documentos) ? body.documentos : [];
+    for (const doc of docs) {
+      if (!doc) continue;
+      const docWithId = {
+        ...doc,
+        id: doc.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+      };
+      await upsertDocumentoInConn(conn, syncCode, pacienteId, docWithId);
+    }
+    await conn.commit();
+
+    // Consulta de confirmação no banco após gravar o paciente e anexos
+    const [confirmPacienteRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE id = ? AND sync_code = ? LIMIT 1',
+      [pacienteId, syncCode]
+    );
+    if (!confirmPacienteRows || confirmPacienteRows.length === 0) {
+      return res.status(500).json({
+        sucesso: false,
+        erro: 'Cadastro não confirmado na tabela pacientes após gravação'
+      });
+    }
+
+    const [confirmDocRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM paciente_documentos WHERE paciente_id = ? AND sync_code = ? ORDER BY created_at ASC',
+      [pacienteId, syncCode]
+    );
+
+    const [pacienteConfirmado] = mapRowsToPacientes(confirmPacienteRows, confirmDocRows || []);
+
+    console.log('[TEMP-LOG][PACIENTE_SAVE]', {
+      syncCode,
+      clinica: body.categoria || 'Ninho',
+      registrosSalvos: 1 + (confirmDocRows?.length || 0)
+    });
+
+    res.status(201).json({
+      sucesso: true,
+      confirmadoNoBanco: true,
+      syncCode,
+      id: pacienteId,
+      paciente: pacienteConfirmado
+    });
+  } catch (erro: any) {
+    if (conn) await conn.rollback().catch(() => {});
+    console.error('Erro ao salvar paciente no MariaDB:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível salvar o paciente no banco de dados'
+    });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.put('/api/pacientes/:id', async (req, res) => {
+  const conn = await db.getConnection().catch(() => null);
+  try {
+    const pacienteId = String(req.params.id);
+    const body = req.body || {};
+    const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+
+    if (!conn) {
+      throw new Error('Não foi possível obter conexão com o banco de dados');
+    }
+
+    const [existingRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE id = ? AND sync_code = ? LIMIT 1',
+      [pacienteId, syncCode]
+    );
+    const existingMapped = existingRows && existingRows.length > 0
+      ? mapRowsToPacientes(existingRows, [])[0]
+      : {};
+
+    const merged = { ...existingMapped, ...body, id: pacienteId };
+    await conn.beginTransaction();
+    await upsertPacienteInConn(conn, syncCode, merged);
+    await conn.commit();
+
+    const [confirmRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM pacientes WHERE id = ? AND sync_code = ? LIMIT 1',
+      [pacienteId, syncCode]
+    );
+    if (!confirmRows || confirmRows.length === 0) {
+      return res.status(500).json({
+        sucesso: false,
+        erro: 'Atualização não confirmada na tabela pacientes'
+      });
+    }
+
+    res.json({
+      sucesso: true,
+      confirmadoNoBanco: true,
+      id: pacienteId
+    });
+  } catch (erro: any) {
+    if (conn) await conn.rollback().catch(() => {});
+    console.error('Erro ao atualizar paciente no MariaDB:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível atualizar o paciente no banco de dados'
+    });
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.delete('/api/pacientes/:id', async (req, res) => {
+  try {
+    const pacienteId = String(req.params.id);
+    const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+
+    await db.execute(
+      'DELETE FROM paciente_documentos WHERE paciente_id = ? AND sync_code = ?',
+      [pacienteId, syncCode]
+    );
+    await db.execute(
+      'DELETE FROM pacientes WHERE id = ? AND sync_code = ?',
+      [pacienteId, syncCode]
+    );
+
+    res.json({ sucesso: true, id: pacienteId });
+  } catch (erro: any) {
+    console.error('Erro ao excluir paciente no MariaDB:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível excluir o paciente no banco de dados'
+    });
+  }
+});
+
+app.post('/api/pacientes/:pacienteId/documentos', async (req, res) => {
+  try {
+    const pacienteId = String(req.params.pacienteId);
+    const body = req.body || {};
+    const syncCode = (String(body.syncCode || req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+    const docId = String(body.id || `doc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
+
+    if (!body.nome) {
+      return res.status(400).json({
+        sucesso: false,
+        erro: 'Nome do documento é obrigatório'
+      });
+    }
+
+    const docPayload = {
+      ...body,
+      id: docId,
+      dataUpload: body.dataUpload || new Date().toISOString()
+    };
+
+    await db.execute(
+      `INSERT INTO paciente_documentos (
+        id, sync_code, paciente_id, nome, tipo, categoria, tamanho, data_upload, url, descricao, enviado_por
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        sync_code = VALUES(sync_code),
+        paciente_id = VALUES(paciente_id),
+        nome = VALUES(nome),
+        tipo = VALUES(tipo),
+        categoria = VALUES(categoria),
+        tamanho = VALUES(tamanho),
+        data_upload = VALUES(data_upload),
+        url = VALUES(url),
+        descricao = VALUES(descricao),
+        enviado_por = VALUES(enviado_por)`,
+      [
+        docId,
+        syncCode,
+        pacienteId,
+        String(docPayload.nome),
+        docPayload.tipo || null,
+        docPayload.categoria || null,
+        docPayload.tamanho !== undefined && docPayload.tamanho !== null ? Number(docPayload.tamanho) : null,
+        String(docPayload.dataUpload),
+        docPayload.url || null,
+        docPayload.descricao || null,
+        docPayload.enviadoPor || null
+      ]
+    );
+
+    // Consulta de confirmação na tabela paciente_documentos após gravar o anexo
+    const [confirmDocRows] = await db.query<RowDataPacket[]>(
+      'SELECT * FROM paciente_documentos WHERE id = ? AND sync_code = ? LIMIT 1',
+      [docId, syncCode]
+    );
+
+    if (!confirmDocRows || confirmDocRows.length === 0) {
+      return res.status(500).json({
+        sucesso: false,
+        erro: 'Anexo não confirmado na tabela paciente_documentos após gravação'
+      });
+    }
+
+    res.status(201).json({
+      sucesso: true,
+      confirmadoNoBanco: true,
+      syncCode,
+      documento: mapRowToDocumento(confirmDocRows[0])
+    });
+  } catch (erro: any) {
+    console.error('Erro ao salvar anexo em paciente_documentos:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível salvar o anexo no banco de dados'
+    });
+  }
+});
+
+app.delete('/api/pacientes/:pacienteId/documentos/:docId', async (req, res) => {
+  try {
+    const pacienteId = String(req.params.pacienteId);
+    const docId = String(req.params.docId);
+    const syncCode = (String(req.query.syncCode || DEFAULT_SYNC_CODE)).trim() || DEFAULT_SYNC_CODE;
+
+    await db.execute(
+      'DELETE FROM paciente_documentos WHERE id = ? AND paciente_id = ? AND sync_code = ?',
+      [docId, pacienteId, syncCode]
+    );
+
+    res.json({ sucesso: true, id: docId });
+  } catch (erro: any) {
+    console.error('Erro ao remover anexo em paciente_documentos:', erro?.code || erro?.message);
+    res.status(500).json({
+      sucesso: false,
+      erro: 'Não foi possível remover o anexo no banco de dados'
+    });
+  }
+});
+
 // Rota para salvar clientes no MariaDB (Hostinger)
 app.post('/api/clientes', async (req, res) => {
   try {
@@ -708,9 +1337,16 @@ app.post('/api/clientes', async (req, res) => {
       [nome, email, telefone || null]
     );
 
+    const insertedId = (resultado as any).insertId;
+    const [confirmRows] = await db.query<RowDataPacket[]>(
+      'SELECT id, nome, email, telefone FROM clientes WHERE id = ? LIMIT 1',
+      [insertedId]
+    );
+
     res.status(201).json({
       sucesso: true,
-      id: (resultado as any).insertId
+      confirmadoNoBanco: Boolean(confirmRows && confirmRows.length > 0),
+      id: insertedId
     });
   } catch (erro: any) {
     console.error('Erro ao salvar cliente:', {
@@ -756,7 +1392,7 @@ async function startServer() {
   try {
     await verificarBanco();
     const existingDefault = await loadClinicData(DEFAULT_SYNC_CODE);
-    if (!existingDefault) {
+    if (!existingDefault && !(await databaseHasAnyRecords())) {
       await saveClinicData(DEFAULT_SYNC_CODE, initialData);
     }
   } catch {

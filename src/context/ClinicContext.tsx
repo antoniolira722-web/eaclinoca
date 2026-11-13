@@ -572,49 +572,54 @@ const defaultInitialState: ClinicState = {
   configuracoes: defaultConfig
 };
 
+const DEFAULT_SYNC_CODE = 'ninho-principal';
+
+const emptyInitialState: ClinicState = {
+  pacientes: [],
+  agenda: [],
+  sessoes: [],
+  planos: [],
+  financeiro: [],
+  lembretes: [],
+  notificacoes: [],
+  relatorios: [],
+  usuarios: DEFAULT_USUARIOS_SISTEMA,
+  configuracoes: defaultConfig
+};
+
 const ClinicContext = createContext<ClinicContextType | undefined>(undefined);
 
 export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [syncCode, setSyncCode] = useState<string>(() => {
-    return localStorage.getItem('ninho_sync_code') || 'ninho-principal';
-  });
+  // Todos os navegadores iniciam com o mesmo syncCode padrão, sem depender do localStorage
+  const [syncCode, setSyncCode] = useState<string>(DEFAULT_SYNC_CODE);
 
-  const [state, setState] = useState<ClinicState>(() => {
-    const saved = localStorage.getItem(`ninho_clinic_data_${syncCode}`);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          ...defaultInitialState,
-          ...parsed,
-          usuarios: parsed.usuarios && parsed.usuarios.length > 0 ? parsed.usuarios : DEFAULT_USUARIOS_SISTEMA,
-          configuracoes: {
-            ...defaultConfig,
-            ...(parsed.configuracoes || {}),
-            nomeClinica: (!parsed.configuracoes?.nomeClinica || parsed.configuracoes.nomeClinica.includes('EA'))
-              ? 'Ninho'
-              : parsed.configuracoes.nomeClinica,
-            seguranca: {
-              ...defaultConfig.seguranca,
-              ...(parsed.configuracoes?.seguranca || {})
-            }
-          }
-        };
-      } catch (e) {
-        console.error('Error parsing local storage clinic data', e);
-      }
-    }
-    return defaultInitialState;
-  });
+  // Estado inicial vazio até carregar diretamente do banco MySQL/MariaDB
+  const [state, setState] = useState<ClinicState>(emptyInitialState);
 
-  const [syncState, setSyncState] = useState<SyncState>('synced');
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(new Date());
+  const [syncState, setSyncState] = useState<SyncState>('syncing');
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const latestStateRef = useRef<ClinicState>(state);
   const hasPendingLocalChangeRef = useRef(false);
   const lastLocalMutationAtRef = useRef<number>(0);
+
+  // Limpa caches antigos de cadastros no navegador para evitar divergência entre navegadores
+  useEffect(() => {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('ninho_clinic_data_') || key === 'ninho_sync_code')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch {
+      // Ignore storage errors
+    }
+  }, []);
 
   // Sound chime for notifications
   const playNotificationSound = useCallback(() => {
@@ -690,42 +695,38 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [playNotificationSound, state.configuracoes?.notificacoesNavegador]);
 
-  const activeDataSyncCodeRef = useRef<string>(syncCode);
-
-  // Keep latestStateRef and localStorage in sync for the active syncCode
+  // Keep latestStateRef in sync in memory only (source of truth is MariaDB)
   useEffect(() => {
     latestStateRef.current = state;
-    localStorage.setItem('ninho_sync_code', syncCode);
-    if (activeDataSyncCodeRef.current === syncCode) {
-      localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(state));
-    }
-  }, [state, syncCode]);
+  }, [state]);
 
-  // Merge server data safely preserving frontend structure
-  const mergeServerData = useCallback((cloudData: Partial<ClinicState>, prev: ClinicState): ClinicState => {
+  // Merge server data strictly from MariaDB without falling back to stale browser arrays
+  const mergeServerData = useCallback((cloudData: Partial<ClinicState>): ClinicState => {
     return {
-      pacientes: cloudData.pacientes ?? prev.pacientes ?? [],
-      agenda: cloudData.agenda ?? prev.agenda ?? [],
-      sessoes: cloudData.sessoes ?? prev.sessoes ?? [],
-      planos: cloudData.planos ?? prev.planos ?? [],
-      financeiro: cloudData.financeiro ?? prev.financeiro ?? [],
-      lembretes: cloudData.lembretes ?? prev.lembretes ?? [],
-      notificacoes: cloudData.notificacoes ?? prev.notificacoes ?? [],
-      relatorios: cloudData.relatorios ?? prev.relatorios ?? [],
-      usuarios: (cloudData.usuarios && cloudData.usuarios.length > 0) ? cloudData.usuarios : prev.usuarios,
+      pacientes: Array.isArray(cloudData.pacientes) ? cloudData.pacientes : [],
+      agenda: Array.isArray(cloudData.agenda) ? cloudData.agenda : [],
+      sessoes: Array.isArray(cloudData.sessoes) ? cloudData.sessoes : [],
+      planos: Array.isArray(cloudData.planos) ? cloudData.planos : [],
+      financeiro: Array.isArray(cloudData.financeiro) ? cloudData.financeiro : [],
+      lembretes: Array.isArray(cloudData.lembretes) ? cloudData.lembretes : [],
+      notificacoes: Array.isArray(cloudData.notificacoes) ? cloudData.notificacoes : [],
+      relatorios: Array.isArray(cloudData.relatorios) ? cloudData.relatorios : [],
+      usuarios: (Array.isArray(cloudData.usuarios) && cloudData.usuarios.length > 0)
+        ? cloudData.usuarios
+        : DEFAULT_USUARIOS_SISTEMA,
       configuracoes: {
         ...defaultConfig,
-        ...(cloudData.configuracoes || prev.configuracoes),
+        ...(cloudData.configuracoes || {}),
         nomeClinica: (!cloudData.configuracoes?.nomeClinica || cloudData.configuracoes.nomeClinica.includes('EA'))
           ? 'Ninho'
           : cloudData.configuracoes.nomeClinica,
         opcoesRelatorio: {
           ...defaultOpcoesRelatorio,
-          ...(cloudData.configuracoes?.opcoesRelatorio || prev.configuracoes?.opcoesRelatorio || {})
+          ...(cloudData.configuracoes?.opcoesRelatorio || {})
         },
         seguranca: {
           ...defaultConfig.seguranca,
-          ...(cloudData.configuracoes?.seguranca || prev.configuracoes?.seguranca || {})
+          ...(cloudData.configuracoes?.seguranca || {})
         }
       }
     };
@@ -744,6 +745,11 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       hasPendingLocalChangeRef.current = false;
       setSyncState('synced');
       setLastSyncTime(new Date());
+      console.log('[TEMP-LOG][FRONTEND_SAVE]', {
+        syncCode: code,
+        clinica: dataToPush.configuracoes?.nomeClinica || 'Ninho',
+        registrosSalvos: dataToPush.pacientes?.length || 0
+      });
       return true;
     } catch (backendErr) {
       console.warn('Falha ao salvar no MariaDB via /api/sync:', backendErr);
@@ -762,7 +768,7 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSyncState('syncing');
     }
     try {
-      const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
+      const res = await fetch(`/api/sync/${encodeURIComponent(code)}?t=${Date.now()}`, {
         method: 'GET',
         cache: 'no-store'
       });
@@ -772,13 +778,16 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (isBackgroundPoll && (hasPendingLocalChangeRef.current || Date.now() - lastLocalMutationAtRef.current < 3000)) {
           return null;
         }
-        const merged = mergeServerData(json.data as Partial<ClinicState>, latestStateRef.current);
-        activeDataSyncCodeRef.current = code;
+        const merged = mergeServerData(json.data as Partial<ClinicState>);
         latestStateRef.current = merged;
-        localStorage.setItem(`ninho_clinic_data_${code}`, JSON.stringify(merged));
         setState(merged);
         setSyncState('synced');
         setLastSyncTime(new Date());
+        console.log('[TEMP-LOG][FRONTEND_LOAD]', {
+          syncCode: code,
+          clinica: merged.configuracoes?.nomeClinica || 'Ninho',
+          registrosCarregados: merged.pacientes?.length || 0
+        });
         return merged;
       }
       return null;
@@ -792,11 +801,9 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Persist mutation immediately to MariaDB using await
   const commitMutation = useCallback(async (updater: (prev: ClinicState) => ClinicState): Promise<ClinicState> => {
     const next = updater(latestStateRef.current);
-    activeDataSyncCodeRef.current = syncCode;
     latestStateRef.current = next;
     hasPendingLocalChangeRef.current = true;
     lastLocalMutationAtRef.current = Date.now();
-    localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(next));
     setState(next);
     if (syncTimeoutRef.current) {
       clearTimeout(syncTimeoutRef.current);
@@ -897,6 +904,19 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const id = `pac_${Date.now()}`;
     const novo: Paciente = { id, ...p };
 
+    try {
+      const resp = await fetch('/api/pacientes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...novo, syncCode })
+      });
+      if (!resp.ok) {
+        console.warn('Falha ao gravar em POST /api/pacientes:', resp.status);
+      }
+    } catch (err) {
+      console.warn('Erro de conexão ao gravar paciente em /api/pacientes:', err);
+    }
+
     await commitMutation(prev => ({
       ...prev,
       pacientes: [novo, ...prev.pacientes]
@@ -913,6 +933,16 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const updatePaciente = async (id: string, p: Partial<Paciente>): Promise<void> => {
+    try {
+      await fetch(`/api/pacientes/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...p, syncCode })
+      });
+    } catch (err) {
+      console.warn('Erro de conexão ao atualizar paciente em /api/pacientes:', err);
+    }
+
     await commitMutation(prev => ({
       ...prev,
       pacientes: prev.pacientes.map(item => item.id === id ? { ...item, ...p } : item)
@@ -920,6 +950,14 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const deletePaciente = async (id: string): Promise<void> => {
+    try {
+      await fetch(`/api/pacientes/${encodeURIComponent(id)}?syncCode=${encodeURIComponent(syncCode)}`, {
+        method: 'DELETE'
+      });
+    } catch (err) {
+      console.warn('Erro de conexão ao excluir paciente em /api/pacientes:', err);
+    }
+
     await commitMutation(prev => ({
       ...prev,
       pacientes: prev.pacientes.filter(item => item.id !== id),
@@ -940,6 +978,20 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       dataUpload: new Date().toISOString(),
       ...docData
     };
+
+    try {
+      const resp = await fetch(`/api/pacientes/${encodeURIComponent(pacienteId)}/documentos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...novoDoc, syncCode })
+      });
+      if (!resp.ok) {
+        console.warn('Falha ao gravar anexo em POST /api/pacientes/:id/documentos:', resp.status);
+      }
+    } catch (err) {
+      console.warn('Erro de conexão ao gravar anexo em paciente_documentos:', err);
+    }
+
     const updated = await commitMutation(prev => ({
       ...prev,
       pacientes: prev.pacientes.map(item => {
@@ -969,6 +1021,15 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     pacienteId: string,
     documentoId: string
   ): Promise<void> => {
+    try {
+      await fetch(
+        `/api/pacientes/${encodeURIComponent(pacienteId)}/documentos/${encodeURIComponent(documentoId)}?syncCode=${encodeURIComponent(syncCode)}`,
+        { method: 'DELETE' }
+      );
+    } catch (err) {
+      console.warn('Erro de conexão ao remover anexo em paciente_documentos:', err);
+    }
+
     await commitMutation(prev => ({
       ...prev,
       pacientes: prev.pacientes.map(item => {
@@ -1290,7 +1351,6 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const alterarSyncCode = async (newCode: string): Promise<void> => {
     const clean = newCode.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     if (!clean) return;
-    localStorage.setItem('ninho_sync_code', clean);
     setSyncCode(clean);
   };
 
@@ -1304,9 +1364,25 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const restaurarDadosPadrao = async (): Promise<void> => {
-    activeDataSyncCodeRef.current = syncCode;
+    try {
+      const res = await fetch(`/api/reset-demo/${encodeURIComponent(syncCode)}`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.data) {
+          const merged = mergeServerData(json.data as Partial<ClinicState>);
+          latestStateRef.current = merged;
+          setState(merged);
+          setSyncState('synced');
+          setLastSyncTime(new Date());
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao restaurar dados via servidor:', err);
+    }
     latestStateRef.current = defaultInitialState;
-    localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(defaultInitialState));
     setState(defaultInitialState);
     await pushToCloud(defaultInitialState, syncCode);
   };
