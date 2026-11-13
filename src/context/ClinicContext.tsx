@@ -18,8 +18,6 @@ import {
   DocumentoAnexo
 } from '../types';
 import { DEFAULT_USUARIOS_SISTEMA } from '../utils/authUtils';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../utils/firebase';
 
 interface ClinicContextType {
   state: ClinicState;
@@ -85,6 +83,7 @@ interface ClinicContextType {
   updateConfiguracoes: (config: Partial<ConfiguracaoClinica>) => Promise<void>;
   alterarSyncCode: (newCode: string) => Promise<void>;
   forcarSincronizacao: () => Promise<void>;
+  recarregarDaNuvem: () => Promise<ClinicState | null>;
   restaurarDadosPadrao: () => Promise<void>;
   exportarBackupJSON: () => void;
   importarBackupJSON: (file: File) => Promise<boolean>;
@@ -613,7 +612,9 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const isFirstMount = useRef(true);
+  const latestStateRef = useRef<ClinicState>(state);
+  const hasPendingLocalChangeRef = useRef(false);
+  const lastLocalMutationAtRef = useRef<number>(0);
 
   // Sound chime for notifications
   const playNotificationSound = useCallback(() => {
@@ -689,128 +690,160 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [playNotificationSound, state.configuracoes?.notificacoesNavegador]);
 
-  // Save to local storage on state change
+  const activeDataSyncCodeRef = useRef<string>(syncCode);
+
+  // Keep latestStateRef and localStorage in sync for the active syncCode
   useEffect(() => {
-    localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(state));
+    latestStateRef.current = state;
     localStorage.setItem('ninho_sync_code', syncCode);
+    if (activeDataSyncCodeRef.current === syncCode) {
+      localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(state));
+    }
   }, [state, syncCode]);
 
-  // Push updates to Firestore and backend fallback
-  const pushToCloud = useCallback(async (dataToPush: ClinicState, code: string) => {
+  // Merge server data safely preserving frontend structure
+  const mergeServerData = useCallback((cloudData: Partial<ClinicState>, prev: ClinicState): ClinicState => {
+    return {
+      pacientes: cloudData.pacientes ?? prev.pacientes ?? [],
+      agenda: cloudData.agenda ?? prev.agenda ?? [],
+      sessoes: cloudData.sessoes ?? prev.sessoes ?? [],
+      planos: cloudData.planos ?? prev.planos ?? [],
+      financeiro: cloudData.financeiro ?? prev.financeiro ?? [],
+      lembretes: cloudData.lembretes ?? prev.lembretes ?? [],
+      notificacoes: cloudData.notificacoes ?? prev.notificacoes ?? [],
+      relatorios: cloudData.relatorios ?? prev.relatorios ?? [],
+      usuarios: (cloudData.usuarios && cloudData.usuarios.length > 0) ? cloudData.usuarios : prev.usuarios,
+      configuracoes: {
+        ...defaultConfig,
+        ...(cloudData.configuracoes || prev.configuracoes),
+        nomeClinica: (!cloudData.configuracoes?.nomeClinica || cloudData.configuracoes.nomeClinica.includes('EA'))
+          ? 'Ninho'
+          : cloudData.configuracoes.nomeClinica,
+        opcoesRelatorio: {
+          ...defaultOpcoesRelatorio,
+          ...(cloudData.configuracoes?.opcoesRelatorio || prev.configuracoes?.opcoesRelatorio || {})
+        },
+        seguranca: {
+          ...defaultConfig.seguranca,
+          ...(cloudData.configuracoes?.seguranca || prev.configuracoes?.seguranca || {})
+        }
+      }
+    };
+  }, []);
+
+  // Push updates directly to MySQL/MariaDB via /api/sync
+  const pushToCloud = useCallback(async (dataToPush: ClinicState, code: string): Promise<boolean> => {
     setSyncState('syncing');
     try {
-      const clinicDocRef = doc(db, 'clinics', code);
-      await setDoc(clinicDocRef, {
-        clinicId: code,
-        pacientes: dataToPush.pacientes || [],
-        agenda: dataToPush.agenda || [],
-        sessoes: dataToPush.sessoes || [],
-        planos: dataToPush.planos || [],
-        financeiro: dataToPush.financeiro || [],
-        lembretes: dataToPush.lembretes || [],
-        notificacoes: dataToPush.notificacoes || [],
-        relatorios: dataToPush.relatorios || [],
-        usuarios: dataToPush.usuarios || [],
-        configuracoes: dataToPush.configuracoes || {},
-        lastUpdated: new Date().toISOString(),
-        version: Date.now()
+      const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dataToPush)
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      hasPendingLocalChangeRef.current = false;
       setSyncState('synced');
       setLastSyncTime(new Date());
-    } catch (err) {
-      console.warn('Firestore direct write failed, trying fallback API sync:', err);
-      try {
-        const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dataToPush)
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setSyncState('synced');
-        setLastSyncTime(new Date());
-      } catch (backendErr) {
-        console.warn('Backend sync failed, saved locally:', backendErr);
-        setSyncState('offline');
-      }
+      return true;
+    } catch (backendErr) {
+      console.warn('Falha ao salvar no MariaDB via /api/sync:', backendErr);
+      hasPendingLocalChangeRef.current = true;
+      setSyncState('offline');
+      return false;
     }
   }, []);
 
-  // Trigger sync on state changes (debounced for rapid edits)
-  const queueSync = useCallback((newState: ClinicState) => {
-    if (!newState.configuracoes?.syncAuto) return;
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    setSyncState('pending');
-    syncTimeoutRef.current = setTimeout(() => {
-      pushToCloud(newState, syncCode);
-    }, 600);
+  // Load clinic data directly from MySQL/MariaDB via /api/sync
+  const fetchFromServer = useCallback(async (code: string, isBackgroundPoll = false): Promise<ClinicState | null> => {
+    if (isBackgroundPoll && (hasPendingLocalChangeRef.current || Date.now() - lastLocalMutationAtRef.current < 3000)) {
+      return null;
+    }
+    if (!isBackgroundPoll) {
+      setSyncState('syncing');
+    }
+    try {
+      const res = await fetch(`/api/sync/${encodeURIComponent(code)}`, {
+        method: 'GET',
+        cache: 'no-store'
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (json?.data && typeof json.data === 'object') {
+        if (isBackgroundPoll && (hasPendingLocalChangeRef.current || Date.now() - lastLocalMutationAtRef.current < 3000)) {
+          return null;
+        }
+        const merged = mergeServerData(json.data as Partial<ClinicState>, latestStateRef.current);
+        activeDataSyncCodeRef.current = code;
+        latestStateRef.current = merged;
+        localStorage.setItem(`ninho_clinic_data_${code}`, JSON.stringify(merged));
+        setState(merged);
+        setSyncState('synced');
+        setLastSyncTime(new Date());
+        return merged;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Erro ao carregar dados do MariaDB via /api/sync:', err);
+      setSyncState('offline');
+      return null;
+    }
+  }, [mergeServerData]);
+
+  // Persist mutation immediately to MariaDB using await
+  const commitMutation = useCallback(async (updater: (prev: ClinicState) => ClinicState): Promise<ClinicState> => {
+    const next = updater(latestStateRef.current);
+    activeDataSyncCodeRef.current = syncCode;
+    latestStateRef.current = next;
+    hasPendingLocalChangeRef.current = true;
+    lastLocalMutationAtRef.current = Date.now();
+    localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(next));
+    setState(next);
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = null;
+    }
+    await pushToCloud(next, syncCode);
+    return next;
   }, [pushToCloud, syncCode]);
 
-  // Real-time synchronization across all computers and phones via Firestore onSnapshot
+  // Flush pending sync before page unload/visibility change
   useEffect(() => {
-    setSyncState('syncing');
-    const clinicDocRef = doc(db, 'clinics', syncCode);
-
-    const unsubscribe = onSnapshot(
-      clinicDocRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const cloudData = docSnap.data() as Partial<ClinicState>;
-          setState(prev => {
-            const merged: ClinicState = {
-              pacientes: cloudData.pacientes ?? prev.pacientes ?? [],
-              agenda: cloudData.agenda ?? prev.agenda ?? [],
-              sessoes: cloudData.sessoes ?? prev.sessoes ?? [],
-              planos: cloudData.planos ?? prev.planos ?? [],
-              financeiro: cloudData.financeiro ?? prev.financeiro ?? [],
-              lembretes: cloudData.lembretes ?? prev.lembretes ?? [],
-              notificacoes: cloudData.notificacoes ?? prev.notificacoes ?? [],
-              relatorios: cloudData.relatorios ?? prev.relatorios ?? [],
-              usuarios: (cloudData.usuarios && cloudData.usuarios.length > 0) ? cloudData.usuarios : prev.usuarios,
-              configuracoes: {
-                ...defaultConfig,
-                ...(cloudData.configuracoes || prev.configuracoes),
-                nomeClinica: (!cloudData.configuracoes?.nomeClinica || cloudData.configuracoes.nomeClinica.includes('EA'))
-                  ? 'Ninho'
-                  : cloudData.configuracoes.nomeClinica,
-                opcoesRelatorio: {
-                  ...defaultOpcoesRelatorio,
-                  ...(cloudData.configuracoes?.opcoesRelatorio || prev.configuracoes?.opcoesRelatorio || {})
-                }
-              }
-            };
-            return merged;
-          });
-          setSyncState('synced');
-          setLastSyncTime(new Date());
-        } else {
-          // Document does not exist in Firestore yet: seed initial data
-          setDoc(clinicDocRef, {
-            clinicId: syncCode,
-            ...defaultInitialState,
-            lastUpdated: new Date().toISOString(),
-            version: 1
-          }).catch((err) => {
-            console.warn('Initial Firestore seed warning:', err);
-          });
-          setSyncState('synced');
-          setLastSyncTime(new Date());
-        }
-      },
-      (error) => {
-        console.warn('Firestore onSnapshot listener error:', error);
-        setSyncState('offline');
-        try {
-          handleFirestoreError(error, OperationType.GET, `clinics/${syncCode}`);
-        } catch (e) {
-          // suppressed
-        }
+    const flushPendingSync = () => {
+      if (hasPendingLocalChangeRef.current) {
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        const body = JSON.stringify(latestStateRef.current);
+        fetch(`/api/sync/${encodeURIComponent(syncCode)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: body.length < 60000
+        }).catch(() => {});
       }
-    );
+    };
 
+    window.addEventListener('pagehide', flushPendingSync);
+    window.addEventListener('beforeunload', flushPendingSync);
     return () => {
-      unsubscribe();
+      window.removeEventListener('pagehide', flushPendingSync);
+      window.removeEventListener('beforeunload', flushPendingSync);
     };
   }, [syncCode]);
+
+  // Load initial data from MariaDB and keep synced via periodic polling
+  useEffect(() => {
+    fetchFromServer(syncCode, false);
+
+    const intervalMs = Math.max(5, Number(state.configuracoes?.syncIntervalSec) || 15) * 1000;
+    const pollInterval = setInterval(() => {
+      if (state.configuracoes?.syncAuto) {
+        fetchFromServer(syncCode, true);
+      }
+    }, intervalMs);
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [syncCode, fetchFromServer, state.configuracoes?.syncAuto, state.configuracoes?.syncIntervalSec]);
 
   // Periodic reminder checking
   useEffect(() => {
@@ -864,28 +897,11 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const id = `pac_${Date.now()}`;
     const novo: Paciente = { id, ...p };
 
-    // Gravação no MariaDB da Hostinger (tabela clientes)
-    if (novo.nome && novo.email) {
-      try {
-        await fetch('/api/clientes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            nome: novo.nome,
-            email: novo.email,
-            telefone: novo.fone || null
-          })
-        });
-      } catch (err) {
-        console.warn('Gravação em /api/clientes MariaDB ignorada em modo local/offline:', err);
-      }
-    }
+    await commitMutation(prev => ({
+      ...prev,
+      pacientes: [novo, ...prev.pacientes]
+    }));
 
-    setState(prev => {
-      const next = { ...prev, pacientes: [novo, ...prev.pacientes] };
-      queueSync(next);
-      return next;
-    });
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Novo Paciente Cadastrado',
@@ -897,30 +913,22 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const updatePaciente = async (id: string, p: Partial<Paciente>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        pacientes: prev.pacientes.map(item => item.id === id ? { ...item, ...p } : item)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      pacientes: prev.pacientes.map(item => item.id === id ? { ...item, ...p } : item)
+    }));
   };
 
   const deletePaciente = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        pacientes: prev.pacientes.filter(item => item.id !== id),
-        agenda: prev.agenda.filter(item => item.pacienteId !== id),
-        sessoes: prev.sessoes.filter(item => item.pacienteId !== id),
-        planos: prev.planos.filter(item => item.pacienteId !== id),
-        financeiro: prev.financeiro.filter(item => item.pacienteId !== id),
-        lembretes: prev.lembretes.filter(item => item.pacienteId !== id)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      pacientes: prev.pacientes.filter(item => item.id !== id),
+      agenda: prev.agenda.filter(item => item.pacienteId !== id),
+      sessoes: prev.sessoes.filter(item => item.pacienteId !== id),
+      planos: prev.planos.filter(item => item.pacienteId !== id),
+      financeiro: prev.financeiro.filter(item => item.pacienteId !== id),
+      lembretes: prev.lembretes.filter(item => item.pacienteId !== id)
+    }));
   };
 
   const anexarDocumentoPaciente = async (
@@ -932,24 +940,20 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       dataUpload: new Date().toISOString(),
       ...docData
     };
-    setState(prev => {
-      const next = {
-        ...prev,
-        pacientes: prev.pacientes.map(item => {
-          if (item.id === pacienteId) {
-            return {
-              ...item,
-              documentos: [...(item.documentos || []), novoDoc]
-            };
-          }
-          return item;
-        })
-      };
-      queueSync(next);
-      return next;
-    });
+    const updated = await commitMutation(prev => ({
+      ...prev,
+      pacientes: prev.pacientes.map(item => {
+        if (item.id === pacienteId) {
+          return {
+            ...item,
+            documentos: [...(item.documentos || []), novoDoc]
+          };
+        }
+        return item;
+      })
+    }));
 
-    const pac = state.pacientes.find(p => p.id === pacienteId);
+    const pac = updated.pacientes.find(p => p.id === pacienteId);
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Documento Anexado',
@@ -965,65 +969,54 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     pacienteId: string,
     documentoId: string
   ): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        pacientes: prev.pacientes.map(item => {
-          if (item.id === pacienteId) {
-            return {
-              ...item,
-              documentos: (item.documentos || []).filter(d => d.id !== documentoId)
-            };
-          }
-          return item;
-        })
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      pacientes: prev.pacientes.map(item => {
+        if (item.id === pacienteId) {
+          return {
+            ...item,
+            documentos: (item.documentos || []).filter(d => d.id !== documentoId)
+          };
+        }
+        return item;
+      })
+    }));
   };
 
   // Agenda
   const addAgendaItem = async (item: Omit<AgendaItem, 'id'>): Promise<string> => {
     const id = `ag_${Date.now()}`;
     const novo: AgendaItem = { id, ...item };
-    setState(prev => {
-      const next = { ...prev, agenda: [...prev.agenda, novo] };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      agenda: [...prev.agenda, novo]
+    }));
     return id;
   };
 
   const updateAgendaItem = async (id: string, item: Partial<AgendaItem>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        agenda: prev.agenda.map(ag => ag.id === id ? { ...ag, ...item } : ag)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      agenda: prev.agenda.map(ag => ag.id === id ? { ...ag, ...item } : ag)
+    }));
   };
 
   const deleteAgendaItem = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = { ...prev, agenda: prev.agenda.filter(ag => ag.id !== id) };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      agenda: prev.agenda.filter(ag => ag.id !== id)
+    }));
   };
 
   // Sessões
   const addSessao = async (sessao: Omit<Sessao, 'id'>): Promise<string> => {
     const id = `ses_${Date.now()}`;
     const novo: Sessao = { id, ...sessao };
-    setState(prev => {
-      const next = { ...prev, sessoes: [novo, ...prev.sessoes] };
-      queueSync(next);
-      return next;
-    });
-    const pacNome = state.pacientes.find(p => p.id === sessao.pacienteId)?.nome || 'Paciente';
+    const updated = await commitMutation(prev => ({
+      ...prev,
+      sessoes: [novo, ...prev.sessoes]
+    }));
+    const pacNome = updated.pacientes.find(p => p.id === sessao.pacienteId)?.nome || 'Paciente';
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Evolução Registrada',
@@ -1035,22 +1028,17 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const updateSessao = async (id: string, sessao: Partial<Sessao>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        sessoes: prev.sessoes.map(s => s.id === id ? { ...s, ...sessao } : s)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      sessoes: prev.sessoes.map(s => s.id === id ? { ...s, ...sessao } : s)
+    }));
   };
 
   const deleteSessao = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = { ...prev, sessoes: prev.sessoes.filter(s => s.id !== id) };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      sessoes: prev.sessoes.filter(s => s.id !== id)
+    }));
   };
 
   // Planos
@@ -1061,88 +1049,71 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ...plano,
       dataCriacao: plano.dataCriacao || new Date().toISOString().slice(0, 10)
     };
-    setState(prev => {
-      const next = { ...prev, planos: [novo, ...prev.planos] };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      planos: [novo, ...prev.planos]
+    }));
     return id;
   };
 
   const updatePlano = async (id: string, plano: Partial<PlanoIntervencao>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        planos: prev.planos.map(pl => pl.id === id ? { ...pl, ...plano } : pl)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      planos: prev.planos.map(pl => pl.id === id ? { ...pl, ...plano } : pl)
+    }));
   };
 
   const deletePlano = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = { ...prev, planos: prev.planos.filter(pl => pl.id !== id) };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      planos: prev.planos.filter(pl => pl.id !== id)
+    }));
   };
 
   // Financeiro
   const addFinanceiro = async (fin: Omit<LancamentoFinanceiro, 'id'>): Promise<string> => {
     const id = `fin_${Date.now()}`;
     const novo: LancamentoFinanceiro = { id, ...fin };
-    setState(prev => {
-      const next = { ...prev, financeiro: [novo, ...prev.financeiro] };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      financeiro: [novo, ...prev.financeiro]
+    }));
     return id;
   };
 
   const updateFinanceiro = async (id: string, fin: Partial<LancamentoFinanceiro>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        financeiro: prev.financeiro.map(f => f.id === id ? { ...f, ...fin } : f)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      financeiro: prev.financeiro.map(f => f.id === id ? { ...f, ...fin } : f)
+    }));
   };
 
   const marcarPago = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        financeiro: prev.financeiro.map(f => f.id === id ? {
-          ...f,
-          status: 'Pago' as const,
-          dataPag: new Date().toISOString().slice(0, 10)
-        } : f)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      financeiro: prev.financeiro.map(f => f.id === id ? {
+        ...f,
+        status: 'Pago' as const,
+        dataPag: new Date().toISOString().slice(0, 10)
+      } : f)
+    }));
   };
 
   const deleteFinanceiro = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = { ...prev, financeiro: prev.financeiro.filter(f => f.id !== id) };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      financeiro: prev.financeiro.filter(f => f.id !== id)
+    }));
   };
 
   // Lembretes
   const addLembrete = async (lem: Omit<Lembrete, 'id' | 'concluido'>): Promise<string> => {
     const id = `lem_${Date.now()}`;
     const novo: Lembrete = { id, ...lem, concluido: false };
-    setState(prev => {
-      const next = { ...prev, lembretes: [novo, ...prev.lembretes] };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      lembretes: [novo, ...prev.lembretes]
+    }));
     adicionarNotificacao({
       tipo: 'lembrete',
       titulo: 'Novo Lembrete Criado',
@@ -1154,22 +1125,17 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const toggleLembrete = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        lembretes: prev.lembretes.map(l => l.id === id ? { ...l, concluido: !l.concluido } : l)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      lembretes: prev.lembretes.map(l => l.id === id ? { ...l, concluido: !l.concluido } : l)
+    }));
   };
 
   const deleteLembrete = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = { ...prev, lembretes: prev.lembretes.filter(l => l.id !== id) };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      lembretes: prev.lembretes.filter(l => l.id !== id)
+    }));
   };
 
   // Relatórios & Laudos
@@ -1181,12 +1147,11 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       dataEmissao: rel.dataEmissao || new Date().toISOString().slice(0, 10),
       status: rel.status || 'Finalizado'
     };
-    setState(prev => {
-      const next = { ...prev, relatorios: [novo, ...(prev.relatorios || [])] };
-      queueSync(next);
-      return next;
-    });
-    const pacNome = state.pacientes.find(p => p.id === rel.pacienteId)?.nome || 'Paciente';
+    const updated = await commitMutation(prev => ({
+      ...prev,
+      relatorios: [novo, ...(prev.relatorios || [])]
+    }));
+    const pacNome = updated.pacientes.find(p => p.id === rel.pacienteId)?.nome || 'Paciente';
     adicionarNotificacao({
       tipo: 'sistema',
       titulo: 'Documento Clínico Gerado',
@@ -1198,29 +1163,21 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const updateRelatorio = async (id: string, rel: Partial<RelatorioDocumento>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        relatorios: (prev.relatorios || []).map(r => r.id === id ? { ...r, ...rel } : r)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      relatorios: (prev.relatorios || []).map(r => r.id === id ? { ...r, ...rel } : r)
+    }));
   };
 
   const deleteRelatorio = async (id: string): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        relatorios: (prev.relatorios || []).filter(r => r.id !== id)
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      relatorios: (prev.relatorios || []).filter(r => r.id !== id)
+    }));
   };
 
   const duplicarRelatorio = async (id: string): Promise<string> => {
-    const original = (state.relatorios || []).find(r => r.id === id);
+    const original = (latestStateRef.current.relatorios || []).find(r => r.id === id);
     if (!original) throw new Error('Relatório original não encontrado');
     const newId = `rel_${Date.now()}`;
     const duplicado: RelatorioDocumento = {
@@ -1230,11 +1187,10 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       dataEmissao: new Date().toISOString().slice(0, 10),
       status: 'Rascunho'
     };
-    setState(prev => {
-      const next = { ...prev, relatorios: [duplicado, ...(prev.relatorios || [])] };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      relatorios: [duplicado, ...(prev.relatorios || [])]
+    }));
     return newId;
   };
 
@@ -1269,101 +1225,88 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       criadoEm: new Date().toISOString().slice(0, 10),
       ativo: u.ativo ?? true
     };
-    setState(prev => {
-      const next = {
-        ...prev,
-        usuarios: [...(prev.usuarios || DEFAULT_USUARIOS_SISTEMA), novoUsuario]
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      usuarios: [...(prev.usuarios || DEFAULT_USUARIOS_SISTEMA), novoUsuario]
+    }));
     return newId;
   };
 
   const updateUsuario = async (id: string, u: Partial<UsuarioSistema>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        usuarios: (prev.usuarios || DEFAULT_USUARIOS_SISTEMA).map(user =>
-          user.id === id ? { ...user, ...u } : user
-        )
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      usuarios: (prev.usuarios || DEFAULT_USUARIOS_SISTEMA).map(user =>
+        user.id === id ? { ...user, ...u } : user
+      )
+    }));
   };
 
   const deleteUsuario = async (id: string): Promise<void> => {
-    setState(prev => {
+    const currentList = latestStateRef.current.usuarios || DEFAULT_USUARIOS_SISTEMA;
+    const admins = currentList.filter(user => user.nivelAcesso === 'admin' && user.id !== id);
+    if (admins.length === 0) {
+      throw new Error('Não é possível remover o único administrador do sistema.');
+    }
+    await commitMutation(prev => {
       const list = prev.usuarios || DEFAULT_USUARIOS_SISTEMA;
-      // Impede deletar o último administrador
-      const admins = list.filter(user => user.nivelAcesso === 'admin' && user.id !== id);
-      if (admins.length === 0) {
-        throw new Error('Não é possível remover o único administrador do sistema.');
-      }
-      const next = {
+      return {
         ...prev,
         usuarios: list.filter(user => user.id !== id)
       };
-      queueSync(next);
-      return next;
     });
   };
 
   const resetSenhaUsuario = async (id: string, novaSenha: string): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        usuarios: (prev.usuarios || DEFAULT_USUARIOS_SISTEMA).map(user =>
-          user.id === id ? { ...user, senha: novaSenha } : user
-        )
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      usuarios: (prev.usuarios || DEFAULT_USUARIOS_SISTEMA).map(user =>
+        user.id === id ? { ...user, senha: novaSenha } : user
+      )
+    }));
   };
 
   const updateConfigSeguranca = async (cfg: Partial<ConfiguracaoSeguranca>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        configuracoes: {
-          ...prev.configuracoes,
-          seguranca: {
-            ...defaultConfig.seguranca!,
-            ...(prev.configuracoes?.seguranca || {}),
-            ...cfg
-          }
+    await commitMutation(prev => ({
+      ...prev,
+      configuracoes: {
+        ...prev.configuracoes,
+        seguranca: {
+          ...defaultConfig.seguranca!,
+          ...(prev.configuracoes?.seguranca || {}),
+          ...cfg
         }
-      };
-      queueSync(next);
-      return next;
-    });
+      }
+    }));
   };
 
   // Configurações & Nuvem
   const updateConfiguracoes = async (config: Partial<ConfiguracaoClinica>): Promise<void> => {
-    setState(prev => {
-      const next = {
-        ...prev,
-        configuracoes: { ...prev.configuracoes, ...config }
-      };
-      queueSync(next);
-      return next;
-    });
+    await commitMutation(prev => ({
+      ...prev,
+      configuracoes: { ...prev.configuracoes, ...config }
+    }));
   };
 
   const alterarSyncCode = async (newCode: string): Promise<void> => {
     const clean = newCode.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     if (!clean) return;
+    localStorage.setItem('ninho_sync_code', clean);
     setSyncCode(clean);
   };
 
   const forcarSincronizacao = async (): Promise<void> => {
-    await pushToCloud(state, syncCode);
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    await pushToCloud(latestStateRef.current, syncCode);
+  };
+
+  const recarregarDaNuvem = async (): Promise<ClinicState | null> => {
+    return await fetchFromServer(syncCode, false);
   };
 
   const restaurarDadosPadrao = async (): Promise<void> => {
+    activeDataSyncCodeRef.current = syncCode;
+    latestStateRef.current = defaultInitialState;
+    localStorage.setItem(`ninho_clinic_data_${syncCode}`, JSON.stringify(defaultInitialState));
     setState(defaultInitialState);
     await pushToCloud(defaultInitialState, syncCode);
   };
@@ -1441,6 +1384,7 @@ export const ClinicProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         updateConfiguracoes,
         alterarSyncCode,
         forcarSincronizacao,
+        recarregarDaNuvem,
         restaurarDadosPadrao,
         exportarBackupJSON,
         importarBackupJSON

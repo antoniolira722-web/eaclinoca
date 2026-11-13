@@ -21,13 +21,13 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const AUTH_STORAGE_KEY = 'ninho_auth_session';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { state, updateUsuario, updateConfigSeguranca } = useClinic();
+  const { state, updateUsuario, updateConfigSeguranca, forcarSincronizacao, recarregarDaNuvem } = useClinic();
   const usuarios = state.usuarios && state.usuarios.length > 0 ? state.usuarios : DEFAULT_USUARIOS_SISTEMA;
   const exigirLogin = state.configuracoes?.seguranca?.exigirLogin ?? true;
 
   const [currentUser, setCurrentUser] = useState<UsuarioSistema | null>(() => {
     try {
-      const saved = localStorage.getItem(AUTH_STORAGE_KEY);
+      const saved = localStorage.getItem(AUTH_STORAGE_KEY) || sessionStorage.getItem(AUTH_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         // Validate if user exists in current users list
@@ -55,9 +55,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // If deactivated, log out
           setCurrentUser(null);
           localStorage.removeItem(AUTH_STORAGE_KEY);
+          sessionStorage.removeItem(AUTH_STORAGE_KEY);
         } else if (JSON.stringify(match) !== JSON.stringify(currentUser)) {
           setCurrentUser(match);
-          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(match));
+          if (localStorage.getItem(AUTH_STORAGE_KEY)) {
+            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(match));
+          } else if (sessionStorage.getItem(AUTH_STORAGE_KEY)) {
+            sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(match));
+          }
         }
       }
     } else if (!exigirLogin) {
@@ -66,7 +71,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [usuarios, exigirLogin]);
 
-  // Login handler
+  // Login handler: lê os usuários mais recentes diretamente do MariaDB antes de validar
   const login = useCallback(
     async (
       usernameInput: string,
@@ -80,7 +85,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, message: 'Informe o usuário/e-mail e a senha.' };
       }
 
-      const match = usuarios.find(
+      const dbState = await recarregarDaNuvem();
+      const listaUsuarios =
+        dbState?.usuarios && dbState.usuarios.length > 0 ? dbState.usuarios : usuarios;
+
+      const match = listaUsuarios.find(
         u =>
           (u.username.toLowerCase() === cleanUser || (u.email && u.email.toLowerCase() === cleanUser)) &&
           u.senha === cleanPass
@@ -94,7 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, message: 'Esta conta de usuário está desativada no sistema. Contate a administração.' };
       }
 
-      // Update last access timestamp
+      // Update last access timestamp in MariaDB
       const agora = new Date().toISOString();
       await updateUsuario(match.id, { ultimoAcesso: agora });
 
@@ -103,19 +112,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (remember) {
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+        sessionStorage.removeItem(AUTH_STORAGE_KEY);
       } else {
         sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updatedUser));
+        localStorage.removeItem(AUTH_STORAGE_KEY);
       }
 
       return { success: true };
     },
-    [usuarios, updateUsuario]
+    [usuarios, updateUsuario, recarregarDaNuvem]
   );
 
-  // Quick switch for testing / dev / demo convenience
+  // Quick switch for testing / dev / demo convenience (reads latest users from MariaDB)
   const quickSwitchUser = useCallback(
     async (username: string): Promise<boolean> => {
-      const match = usuarios.find(u => u.username.toLowerCase() === username.toLowerCase() && u.ativo);
+      const dbState = await recarregarDaNuvem();
+      const listaUsuarios =
+        dbState?.usuarios && dbState.usuarios.length > 0 ? dbState.usuarios : usuarios;
+      const match = listaUsuarios.find(u => u.username.toLowerCase() === username.toLowerCase() && u.ativo);
       if (match) {
         const agora = new Date().toISOString();
         await updateUsuario(match.id, { ultimoAcesso: agora });
@@ -126,15 +140,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       return false;
     },
-    [usuarios, updateUsuario]
+    [usuarios, updateUsuario, recarregarDaNuvem]
   );
 
-  // Logout handler
-  const logout = useCallback(() => {
+  // Logout handler (preserva syncCode e garante flush no MariaDB antes de sair)
+  const logout = useCallback(async () => {
+    await forcarSincronizacao().catch(() => {});
     setCurrentUser(null);
     localStorage.removeItem(AUTH_STORAGE_KEY);
     sessionStorage.removeItem(AUTH_STORAGE_KEY);
-  }, []);
+  }, [forcarSincronizacao]);
 
   // Permission check
   const hasPermission = useCallback(

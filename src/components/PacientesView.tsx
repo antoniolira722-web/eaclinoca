@@ -1720,11 +1720,10 @@ export const PacientesView: React.FC<PacientesViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                    E-mail (Obrigatório para MariaDB) *
+                    E-mail
                   </label>
                   <input
                     type="email"
-                    required
                     value={formEmail}
                     onChange={(e) => setFormEmail(e.target.value)}
                     placeholder="exemplo@email.com"
